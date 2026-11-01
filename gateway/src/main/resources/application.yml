@@ -1,0 +1,33 @@
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  application:
+    name: gateway
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Собственные настройки (GatewayProperties). Секреты — только из окружения в проде.
+gateway:
+  # HS256: тот же ключ, что у core-service и pricing-forecast (не короче 32 байт). Шлюз только проверяет подпись.
+  jwt-secret: ${GATEWAY_JWT_SECRET:dev-only-shared-secret-change-me-0123456789}
+  core-url: ${GATEWAY_CORE_URL:http://localhost:8081}
+  pricing-url: ${GATEWAY_PRICING_URL:http://localhost:8082}
+  # Разрешённые источники браузерных запросов (через запятую). В проде фронтенд и API на одном origin — CORS не нужен.
+  cors-allowed-origins: ${GATEWAY_CORS_ORIGINS:http://localhost:5173}
+  # true — только за обратным прокси, который ПЕРЕЗАПИСЫВАЕТ X-Forwarded-For (nginx из docker-compose это делает)
+  trust-forwarded-for: ${GATEWAY_TRUST_FORWARDED_FOR:false}
+  connect-timeout-ms: 2000
+  response-timeout-ms: 10000      # проектное допущение автора: расчёт цены и размещение укладываются в 10 с
+  login-limit:
+    max-attempts: 10              # проектное допущение автора: попыток входа с одного адреса за окно
+    window-seconds: 60

@@ -1,0 +1,28 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: payment-emulator
+  datasource:
+    url: ${PAYMENT_DB_URL:jdbc:postgresql://localhost:5432/sanatorium_payment}
+    username: ${PAYMENT_DB_USER:payment}
+    password: ${PAYMENT_DB_PASSWORD:payment}
+  mvc:
+    problemdetails:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+payment:
+  api-key: ${PAYMENT_API_KEY:dev-payment-api-key}                    # = core.payment.api-key
+  webhook-secret: ${PAYMENT_WEBHOOK_SECRET:dev-webhook-secret-change-me-0123456789}  # = core.payment.webhook-secret
+  public-base-url: ${PAYMENT_PUBLIC_URL:http://localhost:8083}
+  # Куда вернуть плательщика после оплаты/отказа (интерфейс санатория)
+  return-url: ${PAYMENT_RETURN_URL:http://localhost:3000/my}
+  # SSRF-защита: вебхук отправляется только на адреса с этим префиксом
+  allowed-callback-prefix: ${PAYMENT_ALLOWED_CALLBACK_PREFIX:http://localhost:8081/}

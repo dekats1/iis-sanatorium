@@ -1,0 +1,70 @@
+server:
+  port: 8081
+  shutdown: graceful
+
+spring:
+  application:
+    name: core-service
+  datasource:
+    url: ${CORE_DB_URL:jdbc:postgresql://localhost:5432/sanatorium_core}
+    username: ${CORE_DB_USER:core}
+    password: ${CORE_DB_PASSWORD:core}
+  flyway:
+    enabled: true
+  jpa:
+    open-in-view: false          # транзакции и ленивые коллекции — только в сервисном слое
+    hibernate:
+      ddl-auto: none             # схему ведёт Flyway; после первой локальной сборки можно включить validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  mvc:
+    problemdetails:
+      enabled: true   # RFC 9457 для ошибок самого Spring MVC (405, 404 и т. п.)
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Собственные настройки (CoreProperties). Секреты — только из окружения в проде.
+core:
+  jwt:
+    # HS256: не короче 32 байт. Тот же ключ у pricing-forecast (PRICING_JWT_SECRET).
+    secret: ${CORE_JWT_SECRET:dev-only-shared-secret-change-me-0123456789}
+    ttl-minutes: 60
+    issuer: sanatorium-core
+  pricing:
+    base-url: ${CORE_PRICING_URL:http://localhost:8082}
+    connect-timeout-ms: 1000
+    read-timeout-ms: 3000          # НФТ-02: расчёт цены ≤ 3 с (проектное допущение автора)
+    snapshot-max-age-hours: 72     # резервный снимок цены старше — не используется (принцип 4, раздел 2.1)
+  payment:
+    base-url: ${CORE_PAYMENT_URL:http://localhost:8083}
+    api-key: ${CORE_PAYMENT_API_KEY:dev-payment-api-key}
+    webhook-secret: ${CORE_PAYMENT_WEBHOOK_SECRET:dev-webhook-secret-change-me-0123456789}
+    public-base-url: ${CORE_PUBLIC_URL:http://localhost:8081}
+  booking:
+    max-nights: 60
+    payment-deadline-hours: 24
+    prepay-percent: 30             # доля предоплаты, проектное допущение автора
+    placement-retries: 3
+  events:
+    exchange: sanatorium.events
+  schedule:
+    zone: Europe/Minsk
+    day-start: "08:00"
+    day-minutes: 480            # слот кабинета = day-minutes / slots_per_day (проектное допущение автора)
+  demo:
+    password: ${CORE_DEMO_PASSWORD:demo12345}   # только профиль demo

@@ -1,0 +1,105 @@
+# Полный стенд: БД, брокер, платёжный эмулятор, pricing-forecast, core-service, gateway, frontend (http://localhost:3000).
+# НЕ запускался целиком в среде разработки записки (Docker там недоступен) — проверить локально.
+# Секреты берутся из .env (см. .env.example); значения по умолчанию ниже — только для разработки.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 10
+
+  payment-emulator:
+    build: ./payment-emulator
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      PAYMENT_DB_URL: jdbc:postgresql://postgres:5432/sanatorium_payment
+      PAYMENT_API_KEY: ${PAYMENT_API_KEY:-dev-payment-api-key}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-dev-webhook-secret-change-me-0123456789}
+      PAYMENT_PUBLIC_URL: http://localhost:8083          # адрес страницы оплаты в браузере
+      PAYMENT_RETURN_URL: ${PAYMENT_RETURN_URL:-http://localhost:3000/my}  # возврат плательщика в SPA
+      PAYMENT_ALLOWED_CALLBACK_PREFIX: http://core-service:8081/
+    ports:
+      - "8083:8083"
+
+  pricing-forecast:
+    build: ./pricing-forecast
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment: &pricing-env
+      PRICING_DATABASE_URL: postgresql+psycopg2://pricing:pricing@postgres:5432/sanatorium_pricing
+      PRICING_JWT_SECRET: ${JWT_SECRET:-dev-only-shared-secret-change-me-0123456789}
+      PRICING_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+    command: sh -c "alembic upgrade head && uvicorn pricing_forecast.main:app --host 0.0.0.0 --port 8082"
+    ports:
+      - "8082:8082"   # только для разработки (Swagger, отладка); снаружи доступ идёт через gateway — в проде порт убрать
+
+  pricing-consumer:
+    build: ./pricing-forecast
+    depends_on:
+      pricing-forecast: {condition: service_started}
+      rabbitmq: {condition: service_healthy}
+    environment: *pricing-env
+    command: python -m pricing_forecast.events.rabbitmq
+
+  core-service:
+    build: ./core-service
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    environment:
+      SPRING_PROFILES_ACTIVE: ${CORE_PROFILE:-demo}
+      CORE_DB_URL: jdbc:postgresql://postgres:5432/sanatorium_core
+      CORE_JWT_SECRET: ${JWT_SECRET:-dev-only-shared-secret-change-me-0123456789}
+      CORE_PRICING_URL: http://pricing-forecast:8082
+      CORE_PAYMENT_URL: http://payment-emulator:8083
+      CORE_PAYMENT_API_KEY: ${PAYMENT_API_KEY:-dev-payment-api-key}
+      CORE_PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-dev-webhook-secret-change-me-0123456789}
+      CORE_PUBLIC_URL: http://core-service:8081
+      RABBITMQ_HOST: rabbitmq
+    ports:
+      - "8081:8081"   # только для разработки (Swagger, отладка); снаружи доступ идёт через gateway — в проде порт убрать
+
+  gateway:
+    build: ./gateway
+    depends_on:
+      core-service: {condition: service_started}
+      pricing-forecast: {condition: service_started}
+    environment:
+      GATEWAY_JWT_SECRET: ${JWT_SECRET:-dev-only-shared-secret-change-me-0123456789}
+      GATEWAY_CORE_URL: http://core-service:8081
+      GATEWAY_PRICING_URL: http://pricing-forecast:8082
+      GATEWAY_TRUST_FORWARDED_FOR: "true"   # шлюз стоит за nginx, который перезаписывает X-Forwarded-For
+      # SPA на :3000 ходит через nginx-прокси; Origin браузера совпадает с origin страницы,
+      # но Host до шлюза доходит без порта — поэтому origin :3000 явно разрешён.
+      GATEWAY_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173
+    ports:
+      - "8080:8080"   # для разработки (vite proxy); пользователи заходят через frontend
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      gateway: {condition: service_started}
+    ports:
+      - "3000:80"
+
+volumes:
+  pgdata:
