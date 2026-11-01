@@ -38,6 +38,33 @@ class PriceRuleIn(BaseModel):
     closed: bool = False
 
 
+@router.get("/seasons")
+def list_seasons(db: Session = Depends(get_db), _u: CurrentUser = Depends(require_manager)):
+    rows = db.query(SeasonPeriod).order_by(SeasonPeriod.date_from).all()
+    return [
+        {"id": s.id, "name": s.name, "date_from": s.date_from, "date_to": s.date_to, "k_season": float(s.k_season)}
+        for s in rows
+    ]
+
+
+@router.get("/tariffs")
+def list_tariffs(
+    season_id: int | None = None,
+    category_id: int | None = None,
+    db: Session = Depends(get_db),
+    _u: CurrentUser = Depends(require_manager),
+):
+    q = db.query(Tariff)
+    if season_id is not None:
+        q = q.filter(Tariff.season_id == season_id)
+    if category_id is not None:
+        q = q.filter(Tariff.category_id == category_id)
+    return [
+        {"id": t.id, "season_id": t.season_id, "category_id": t.category_id, "price_base": float(t.price_base)}
+        for t in q.order_by(Tariff.season_id, Tariff.category_id).all()
+    ]
+
+
 @router.post("/seasons", status_code=status.HTTP_201_CREATED)
 def create_season(body: SeasonIn, db: Session = Depends(get_db), _u: CurrentUser = Depends(require_manager)):
     season = SeasonPeriod(**body.model_dump())

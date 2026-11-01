@@ -5,15 +5,20 @@ import {
   Badge,
   Button,
   Card,
+  EmptyState,
   ErrorBox,
   Field,
+  Notice,
+  Stepper,
   money,
   StatusBadge,
 } from '../components/ui';
+import { Icon } from '../components/icons';
+import { RoomImage } from '../components/RoomArt';
 import { useAuth } from '../hooks/useAuth';
 import PhotoGalleryModal from '../components/PhotoGalleryModal';
 import { CATEGORY_MEDIA } from '../api/interactiveMapAndRecommendations';
-import type { ClientView, Coded, LoyaltyAccount, RoomCategory, SalesChannel, VoucherView } from '../types';
+import type { CategoryAvailability, ClientView, Coded, LoyaltyAccount, RoomCategory, SalesChannel, VoucherView } from '../types';
 
 export default function BookingPage() {
   const [params] = useSearchParams();
@@ -43,6 +48,7 @@ export default function BookingPage() {
 
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [offer, setOffer] = useState<CategoryAvailability | null>(null);
 
   useEffect(() => {
     Promise.all([directory.profiles(), directory.diets(), directory.channels(), directory.categories()])
@@ -61,6 +67,14 @@ export default function BookingPage() {
     }
   }, [isAdmin]);
 
+  useEffect(() => {
+    if (!categoryId || !checkIn || !checkOut) return;
+    booking
+      .availability(checkIn, checkOut, places)
+      .then((list) => setOffer(list.find((c) => c.categoryId === categoryId) ?? null))
+      .catch(() => undefined);
+  }, [categoryId, checkIn, checkOut, places]);
+
   // Load loyalty account for current user or selected client
   useEffect(() => {
     const targetClientId = isAdmin && clientId ? Number(clientId) : 1;
@@ -75,16 +89,26 @@ export default function BookingPage() {
 
   if (!categoryId || !checkIn || !checkOut) {
     return (
-      <div className="card" style={{ maxWidth: 500, margin: '40px auto', textAlign: 'center' }}>
-        <h3>Параметры бронирования не выбраны</h3>
-        <p style={{ color: 'var(--text-muted)' }}>
-          Пожалуйста, начните выбор номера со страницы поиска свободных мест.
-        </p>
-        <Link to="/search">
-          <Button variant="primary">Перейти к поиску номеров</Button>
-        </Link>
+      <div className="card booking-missing">
+        <EmptyState
+          title="Параметры бронирования не выбраны"
+          description="Пожалуйста, начните выбор номера со страницы поиска свободных мест."
+          action={<Link to="/search" className="btn-link-reset"><Button variant="primary">Перейти к поиску номеров</Button></Link>}
+        />
       </div>
     );
+  }
+
+  /** Возврат после оплаты: у администратора бронирования нет доступа к /my — ведём его в /admin-bookings. */
+  function payTarget(url: string): string {
+    if (!isAdmin) return url;
+    try {
+      const u = new URL(url, window.location.origin);
+      if (u.origin === window.location.origin && u.pathname === '/my') return `/admin-bookings${u.search}`;
+    } catch {
+      /* некорректный URL — оставляем как есть */
+    }
+    return url;
   }
 
   async function submit(e: FormEvent) {
@@ -122,7 +146,7 @@ export default function BookingPage() {
       // Redirect to payment emulator
       try {
         const p = await booking.pay(created.id);
-        window.location.assign(p.payUrl);
+        window.location.assign(payTarget(p.payUrl));
         return;
       } catch (payErr) {
         setError(payErr);
@@ -139,253 +163,176 @@ export default function BookingPage() {
     setError(null);
     try {
       const p = await booking.pay(voucher.id);
-      window.location.assign(p.payUrl);
+      window.location.assign(payTarget(p.payUrl));
     } catch (err) {
       setError(err);
     }
   }
+
+  const nights = Math.max(1, Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000));
+  const categoryName = categories.find((c) => c.id === categoryId)?.name || offer?.name || `Категория №${categoryId}`;
+  const perNight = offer?.priceAvailable ? offer.pricePerPlaceDay : null;
+  const estimate = perNight !== null && perNight !== undefined ? perNight * nights * places : null;
+  const discount = useBonuses ? bonusPointsToApply : 0;
+  const media = CATEGORY_MEDIA[categoryId];
 
   return (
     <section>
       <div className="page-head">
         <div>
           <h1>Оформление путёвки в санаторий</h1>
-          <p className="card-subtitle">
-            Период проживания: с <strong>{checkIn}</strong> по <strong>{checkOut}</strong> (мест в заявке: <strong>{places}</strong>)
+          <p className="page-subtitle">
+            Период проживания: с <strong>{checkIn}</strong> по <strong>{checkOut}</strong> ({nights} {nights === 1 ? 'ночь' : nights < 5 ? 'ночи' : 'ночей'}), мест в заявке: <strong>{places}</strong>
           </p>
         </div>
       </div>
 
+      <Stepper steps={['Параметры', 'Оплата', 'Готово']} current={voucher ? 1 : 0} />
+
       <ErrorBox error={error} />
 
       {!voucher ? (
-        <form onSubmit={submit} style={{ maxWidth: 780, margin: '0 auto' }}>
-          {/* Selected Room Photo Banner */}
-          {categoryId && CATEGORY_MEDIA[categoryId] && (
-            <>
-              <div
-                className="booking-room-banner"
-                onClick={() => setIsGalleryOpen(true)}
-                title="Нажмите, чтобы просмотреть все фотографии номера"
-                style={{ cursor: 'pointer' }}
-              >
-                <img
-                  src={CATEGORY_MEDIA[categoryId].cover}
-                  alt=""
-                  className="booking-room-banner-img"
-                />
-                <div className="booking-room-banner-overlay">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span className="booking-room-badge">
-                      {params.get('room') ? `Выбран конкретный номер №${params.get('room')}` : 'Выбрана категория номера'}
-                    </span>
-                    <button
-                      type="button"
-                      className="booking-banner-photos-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsGalleryOpen(true);
-                      }}
-                    >
-                      📷 Все фото ({CATEGORY_MEDIA[categoryId].photos.length})
-                    </button>
-                  </div>
-                  <h3 className="booking-room-title">
-                    {categories.find((c) => c.id === categoryId)?.name || `Категория №${categoryId}`}
-                  </h3>
-                  <p className="booking-room-subtitle">
-                    Период: {checkIn} — {checkOut} • Мест в номере: {places} • Нажмите для просмотра галереи
-                  </p>
-                </div>
-              </div>
-
-              {isGalleryOpen && (
-                <PhotoGalleryModal
-                  isOpen={isGalleryOpen}
-                  onClose={() => setIsGalleryOpen(false)}
-                  title={`Фотографии номера • ${categories.find((c) => c.id === categoryId)?.name || `Категория №${categoryId}`}`}
-                  photos={CATEGORY_MEDIA[categoryId].photos}
-                />
-              )}
-            </>
-          )}
-
-          <Card title="Параметры бронирования">
-            {isAdmin && (
-              <Field label="Гость (Клиент)" required>
-                <select value={clientId} onChange={(e) => setClientId(e.target.value)} required>
-                  <option value="">— Выберите гостя из базы —</option>
-                  {clientList.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.lastName} {c.firstName} {c.middleName ?? ''} (род. {c.birthDate}, #{c.id})
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-              <Field label="Лечебный профиль оздоровления" required>
-                <select value={profileId} onChange={(e) => setProfileId(e.target.value)} required>
-                  <option value="">— Выберите профиль —</option>
-                  {profiles.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Диетическое питание (Стол)">
-                <select value={dietId} onChange={(e) => setDietId(e.target.value)}>
-                  <option value="">Стандартное питание (Без диеты)</option>
-                  {diets.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} ({d.code})
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-
-            <Field label="Канал бронирования / Партнёр" required>
-              <select value={channelId} onChange={(e) => setChannelId(e.target.value)} required>
-                <option value="">— Выберите канал —</option>
-                {channels.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} (комиссия {c.commissionPct}%)
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            {/* Loyalty bonus redemption widget */}
-            {loyaltyAcc && loyaltyAcc.balance > 0 && (
-              <div
-                style={{
-                  background: 'var(--surface-alt)',
-                  border: '1px solid var(--line-strong)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: 16,
-                  marginTop: 18,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label className="check" style={{ fontWeight: 700 }}>
-                    <input
-                      type="checkbox"
-                      checked={useBonuses}
-                      onChange={(e) => setUseBonuses(e.target.checked)}
-                    />
-                    <span>⭐ Списать бонусы программы лояльности</span>
-                  </label>
-                  <Badge variant="good">
-                    Доступно: {loyaltyAcc.balance.toLocaleString('ru-RU')} баллов
-                  </Badge>
-                </div>
-
-                {useBonuses && (
-                  <div style={{ marginTop: 12, paddingLeft: 26 }}>
-                    <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', margin: '0 0 8px' }}>
-                      1 бонусный балл = 1 BYN скидки (можно оплатить до 30% суммы бронирования).
-                    </p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <input
-                        type="number"
-                        min={1}
-                        max={loyaltyAcc.balance}
-                        value={bonusPointsToApply}
-                        onChange={(e) =>
-                          setBonusPointsToApply(
-                            Math.min(loyaltyAcc.balance, Math.max(0, Number(e.target.value)))
-                          )
-                        }
-                        style={{ width: 140 }}
-                      />
-                      <span style={{ fontWeight: 600, color: 'var(--accent)' }}>
-                        Скидка: -{money(bonusPointsToApply)}
+        <form onSubmit={submit} className="booking-layout">
+          <div className="booking-main">
+            {media && (
+              <>
+                <div className="booking-room-banner" role="button" tabIndex={0} onClick={() => setIsGalleryOpen(true)}
+                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIsGalleryOpen(true); } }}
+                     aria-label="Открыть фотографии номера">
+                  <RoomImage src={media.cover} seed={categoryId} className="booking-room-banner-img" />
+                  <div className="booking-room-banner-overlay">
+                    <div className="booking-banner-top">
+                      <span className="booking-room-badge">
+                        {params.get('room') ? `Выбран конкретный номер №${params.get('room')}` : 'Выбрана категория номера'}
                       </span>
+                      <span className="booking-banner-photos-btn"><Icon name="camera" size={16} /> Все фото ({media.photos.length})</span>
                     </div>
+                    <h3 className="booking-room-title">{categoryName}</h3>
                   </div>
+                </div>
+                {isGalleryOpen && (
+                  <PhotoGalleryModal
+                    isOpen={isGalleryOpen}
+                    onClose={() => setIsGalleryOpen(false)}
+                    title={`Фотографии номера • ${categoryName}`}
+                    photos={media.photos}
+                  />
                 )}
-              </div>
+              </>
             )}
 
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: 12,
-                marginTop: 24,
-                paddingTop: 16,
-                borderTop: '1px solid var(--line)',
-              }}
-            >
-              <Link to="/search">
-                <Button type="button" variant="secondary">
-                  Назад к поиску
-                </Button>
-              </Link>
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={busy || !profileId || !channelId || (isAdmin && !clientId)}
-              >
-                {busy ? 'Оформление…' : 'Забронировать и перейти к оплате'}
-              </Button>
+            <Card title="Параметры бронирования" subtitle="Поля со звёздочкой обязательны">
+              {isAdmin && (
+                <Field label="Гость (Клиент)" required>
+                  <select value={clientId} onChange={(e) => setClientId(e.target.value)} required>
+                    <option value="">— Выберите гостя из базы —</option>
+                    {clientList.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.lastName} {c.firstName} {c.middleName ?? ''} (род. {c.birthDate}, #{c.id})
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+
+              <div className="form-grid">
+                <Field label="Лечебный профиль оздоровления" required>
+                  <select value={profileId} onChange={(e) => setProfileId(e.target.value)} required>
+                    <option value="">— Выберите профиль —</option>
+                    {profiles.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+                  </select>
+                </Field>
+                <Field label="Диетическое питание (Стол)">
+                  <select value={dietId} onChange={(e) => setDietId(e.target.value)}>
+                    <option value="">Стандартное питание (Без диеты)</option>
+                    {diets.map((d) => (<option key={d.id} value={d.id}>{d.name} ({d.code})</option>))}
+                  </select>
+                </Field>
+              </div>
+
+              <Field label="Канал бронирования / Партнёр" required>
+                <select value={channelId} onChange={(e) => setChannelId(e.target.value)} required>
+                  <option value="">— Выберите канал —</option>
+                  {channels.map((c) => (<option key={c.id} value={c.id}>{c.name} (комиссия {c.commissionPct}%)</option>))}
+                </select>
+              </Field>
+
+              {loyaltyAcc && loyaltyAcc.balance > 0 && (
+                <div className="loyalty-redeem">
+                  <div className="loyalty-redeem-head">
+                    <label className="check">
+                      <input type="checkbox" checked={useBonuses} onChange={(e) => setUseBonuses(e.target.checked)} />
+                      <span>Списать бонусы программы лояльности</span>
+                    </label>
+                    <Badge variant="good" icon="star">Доступно: {loyaltyAcc.balance.toLocaleString('ru-RU')} баллов</Badge>
+                  </div>
+                  {useBonuses && (
+                    <div className="loyalty-redeem-body">
+                      <p className="field-hint">1 бонусный балл = 1 BYN скидки (можно оплатить до 30% суммы бронирования).</p>
+                      <div className="row">
+                        <input
+                          type="number" min={1} max={loyaltyAcc.balance} value={bonusPointsToApply}
+                          aria-label="Количество бонусных баллов" className="input-narrow"
+                          onChange={(e) => setBonusPointsToApply(Math.min(loyaltyAcc.balance, Math.max(0, Number(e.target.value))))}
+                        />
+                        <strong className="discount-line">Скидка: -{money(bonusPointsToApply)}</strong>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          </div>
+
+          <aside className="booking-summary card" aria-label="Итог бронирования">
+            <h3>Ваша путёвка</h3>
+            <dl>
+              <dt>Категория</dt><dd>{categoryName}</dd>
+              <dt>Заезд</dt><dd>{checkIn}</dd>
+              <dt>Выезд</dt><dd>{checkOut}</dd>
+              <dt>Мест</dt><dd>{places}</dd>
+            </dl>
+            <div className="price-lines">
+              <div><span>Цена за сутки (место)</span><strong>{perNight !== null ? money(perNight) : 'уточняется'}</strong></div>
+              <div><span>{nights} × {places} (ночей × мест)</span><strong>{estimate !== null ? money(estimate) : '—'}</strong></div>
+              {discount > 0 && <div className="is-discount"><span>Бонусы</span><strong>-{money(discount)}</strong></div>}
             </div>
-          </Card>
+            <div className="price-total">
+              <span>Итого</span>
+              <strong>{estimate !== null ? money(Math.max(0, estimate - discount)) : 'при оформлении'}</strong>
+            </div>
+            <Button type="submit" variant="primary" size="lg" className="btn-block" loading={busy} disabled={!profileId || !channelId || (isAdmin && !clientId)}>
+              {busy ? 'Оформление…' : 'Забронировать и перейти к оплате'}
+            </Button>
+            <Link to="/search" className="btn-link-reset"><Button type="button" variant="secondary" className="btn-block">Назад к поиску</Button></Link>
+            <p className="field-hint"><Icon name="shield" size={14} /> Оплата проходит на защищённой странице платёжного эмулятора.</p>
+          </aside>
         </form>
       ) : (
-        <Card
-          title={`Путёвка #${voucher.id} успешно сформирована`}
-          subtitle="Заявка зафиксирована в системе бронирования"
-          style={{ maxWidth: 640, margin: '0 auto' }}
-        >
-          <dl style={{ margin: '16px 0 24px', fontSize: '0.95rem' }}>
+        <Card className="booking-done" title={`Путёвка #${voucher.id} успешно сформирована`} subtitle="Заявка зафиксирована в системе бронирования">
+          <dl>
             <dt>Статус:</dt>
-            <dd>
-              <StatusBadge status={voucher.status} />
-            </dd>
+            <dd><StatusBadge status={voucher.status} /></dd>
             <dt>Номер комнаты:</dt>
             <dd>{voucher.roomNumber ? `№ ${voucher.roomNumber}` : 'Будет назначен при заезде'}</dd>
             <dt>Тариф в сутки:</dt>
             <dd>{money(voucher.pricePerPlaceDay, voucher.currency ?? 'BYN')}</dd>
             <dt>Итого к оплате:</dt>
-            <dd style={{ color: 'var(--accent)', fontWeight: 800, fontSize: '1.2rem' }}>
-              {money(voucher.totalPrice, voucher.currency ?? 'BYN')}
-            </dd>
+            <dd className="price-big">{money(voucher.totalPrice, voucher.currency ?? 'BYN')}</dd>
           </dl>
 
           {voucher.status === 'AWAITING_PAYMENT' && (
-            <div
-              style={{
-                background: 'var(--amber-soft)',
-                padding: '14px 18px',
-                borderRadius: 'var(--radius-md)',
-                marginBottom: 20,
-              }}
-            >
-              <p style={{ margin: 0, fontSize: '0.9rem', color: '#7A4B06', lineHeight: 1.5 }}>
-                ⏳ Оплату необходимо завершить до{' '}
-                <strong>
-                  {voucher.paymentDeadline
-                    ? new Date(voucher.paymentDeadline).toLocaleTimeString('ru-RU')
-                    : '—'}
-                </strong>
-                , иначе бронь будет автоматически аннулирована.
-              </p>
-            </div>
+            <Notice tone="warning">
+              Оплату необходимо завершить до{' '}
+              <strong>{voucher.paymentDeadline ? new Date(voucher.paymentDeadline).toLocaleTimeString('ru-RU') : '—'}</strong>
+              , иначе бронь будет автоматически аннулирована.
+            </Notice>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-            <Link to="/my">
-              <Button variant="secondary">В мои путёвки</Button>
-            </Link>
+          <div className="row row-end">
+            <Link to="/my" className="btn-link-reset"><Button variant="secondary">В мои путёвки</Button></Link>
             {voucher.status === 'AWAITING_PAYMENT' && (
-              <Button variant="primary" onClick={() => void pay()}>
-                Перейти на страницу оплаты
-              </Button>
+              <Button variant="primary" onClick={() => void pay()}>Перейти на страницу оплаты</Button>
             )}
           </div>
         </Card>

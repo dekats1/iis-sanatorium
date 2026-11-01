@@ -18,7 +18,8 @@ export async function loginViaUi(page: Page, user: DemoUser): Promise<void> {
   await page.getByLabel('Логин').fill(user.username);
   await page.getByLabel('Пароль').fill(user.password);
   await page.getByRole('button', { name: 'Войти' }).click();
-  await expect(page.getByRole('button', { name: 'Выйти' })).toBeVisible();
+  // Выход находится в меню пользователя; признак входа — боковая навигация приложения.
+  await expect(page.getByRole('navigation', { name: 'Основное меню' })).toBeVisible();
 }
 
 export async function apiToken(request: APIRequestContext, user: DemoUser): Promise<string> {

@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent } from 'react';
-import { Button, Modal } from './ui';
+import { Button, ErrorBox, Modal, Spinner, useConfirm } from './ui';
+import { Icon } from './icons';
 import { compressImage, PRESET_AVATARS, type PresetAvatar } from '../utils/avatar';
 
 interface AvatarUploadProps {
@@ -19,6 +20,7 @@ export default function AvatarUpload({
   const [isPresetModalOpen, setIsPresetModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ask, confirmDialog] = useConfirm();
 
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -33,7 +35,7 @@ export default function AvatarUpload({
       setError(err instanceof Error ? err.message : 'Не удалось загрузить изображение');
     } finally {
       setBusy(false);
-      // Reset input so re-selecting same file triggers onChange
+      // Сбрасываем input, чтобы повторный выбор того же файла снова вызвал onChange
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -44,125 +46,125 @@ export default function AvatarUpload({
     setIsPresetModalOpen(false);
   };
 
-  const handleRemove = () => {
+  const handleRemove = async () => {
+    const ok = await ask({
+      title: 'Удалить фото профиля?',
+      message: 'Вместо фото будет показана первая буква имени. Загрузить новое фото можно в любой момент.',
+      confirmLabel: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     onSaveAvatar(null);
   };
 
+  const openFilePicker = () => fileInputRef.current?.click();
   const initial = userName.trim().slice(0, 1).toUpperCase() || 'U';
 
   return (
-    <div className="avatar-upload-container">
-      {/* Hidden file input */}
+    <div className="gx-avatar">
       <input
         ref={fileInputRef}
         type="file"
         accept="image/png,image/jpeg,image/webp"
-        style={{ display: 'none' }}
+        className="gx-visually-hidden"
+        tabIndex={-1}
+        aria-hidden="true"
         onChange={handleFileChange}
       />
 
-      {/* Main Avatar Preview circle */}
-      <div
-        className="avatar-preview-wrap"
+      <button
+        type="button"
+        className="gx-avatar-circle"
         style={{ width: size, height: size }}
-        onClick={() => fileInputRef.current?.click()}
+        onClick={openFilePicker}
+        disabled={busy}
+        aria-label={`Загрузить новое фото профиля (${userName})`}
         title="Нажмите, чтобы загрузить новое фото"
       >
         {currentAvatarUrl ? (
-          <img src={currentAvatarUrl} alt={userName} className="avatar-preview-img" />
+          <img src={currentAvatarUrl} alt="" className="gx-avatar-img" />
         ) : (
-          <div className="avatar-placeholder-circle" style={{ fontSize: size * 0.42 }}>
+          <span className="gx-avatar-initial" style={{ fontSize: size * 0.42 }} aria-hidden="true">
             {initial}
-          </div>
+          </span>
         )}
 
-        <div className="avatar-edit-overlay">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-            <circle cx="12" cy="13" r="4"/>
-          </svg>
-        </div>
+        <span className="gx-avatar-overlay" aria-hidden="true">
+          <Icon name="camera" size={20} />
+        </span>
 
-        {busy && <div className="avatar-spinner-overlay">...</div>}
-      </div>
+        {busy && (
+          <span className="gx-avatar-busy">
+            <Spinner label="Обработка изображения" />
+          </span>
+        )}
+      </button>
 
-      {/* Action Controls */}
-      <div className="avatar-actions-wrap">
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={busy}
-          >
+      <div className="gx-avatar-side">
+        <div className="u-flex-wrap u-inline-gap">
+          <Button type="button" variant="outline" size="sm" onClick={openFilePicker} disabled={busy} icon={<Icon name="camera" size={16} />}>
             Загрузить фото
           </Button>
 
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsPresetModalOpen(true)}
-            disabled={busy}
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={() => setIsPresetModalOpen(true)} disabled={busy} icon={<Icon name="image" size={16} />}>
             Выбрать аватар
           </Button>
 
           {currentAvatarUrl && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleRemove}
-              disabled={busy}
-              style={{ color: 'var(--danger, #ef4444)' }}
-            >
+            <Button type="button" variant="ghost" size="sm" className="gx-text-danger" onClick={() => void handleRemove()} disabled={busy} icon={<Icon name="trash" size={16} />}>
               Удалить
             </Button>
           )}
         </div>
 
-        <p className="avatar-hint-text">
+        <p className="u-muted-sm u-m0">
           Поддерживаются форматы JPG, PNG или WebP (до 10 МБ). Автоматически кадрируется в круг.
         </p>
 
-        {error && <p className="avatar-error-text">{error}</p>}
+        <ErrorBox error={error} />
       </div>
 
-      {/* Presets Modal */}
-      {isPresetModalOpen && (
-        <Modal
-          isOpen={isPresetModalOpen}
-          onClose={() => setIsPresetModalOpen(false)}
-          title="Выберите готовый аватар санатория"
-          size="md"
-        >
-          <div className="avatar-presets-grid">
-            {PRESET_AVATARS.map((preset) => (
-              <div
+      <Modal
+        isOpen={isPresetModalOpen}
+        onClose={() => setIsPresetModalOpen(false)}
+        title="Выберите готовый аватар санатория"
+        size="md"
+        footer={
+          <Button variant="secondary" onClick={() => setIsPresetModalOpen(false)}>
+            Отмена
+          </Button>
+        }
+      >
+        <div className="gx-presets">
+          {PRESET_AVATARS.map((preset) => {
+            const selected = preset.url === currentAvatarUrl;
+            return (
+              <button
                 key={preset.id}
-                className="avatar-preset-item"
+                type="button"
+                className="gx-preset"
+                aria-pressed={selected}
                 onClick={() => handleSelectPreset(preset)}
                 title={preset.description}
               >
-                <img src={preset.url} alt={preset.name} className="avatar-preset-img" />
-                <div className="avatar-preset-info">
-                  <strong className="avatar-preset-title">{preset.name}</strong>
-                  <span className="avatar-preset-desc">{preset.description}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+                <img src={preset.url} alt="" className="gx-preset-img" />
+                <span className="gx-preset-info">
+                  <strong className="gx-preset-title">{preset.name}</strong>
+                  <span className="gx-preset-desc">{preset.description}</span>
+                </span>
+                {selected && (
+                  <span className="gx-preset-check" aria-hidden="true">
+                    <Icon name="check" size={14} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </Modal>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-            <Button variant="secondary" onClick={() => setIsPresetModalOpen(false)}>
-              Отмена
-            </Button>
-          </div>
-        </Modal>
-      )}
+      {confirmDialog}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import sanatorium.core.common.ApiException;
@@ -25,16 +26,20 @@ public class RoomMapService {
     private final RoomCategoryRepository categoryRepository;
 
     private static final Map<Integer, BigDecimal> DEFAULT_PRICES = Map.of(
-            1, BigDecimal.valueOf(120),
-            2, BigDecimal.valueOf(160),
-            3, BigDecimal.valueOf(250),
-            4, BigDecimal.valueOf(220),
-            5, BigDecimal.valueOf(350)
+            1, BigDecimal.valueOf(85),
+            2, BigDecimal.valueOf(115),
+            3, BigDecimal.valueOf(165),
+            4, BigDecimal.valueOf(130),
+            5, BigDecimal.valueOf(260),
+            6, BigDecimal.valueOf(105)
     );
 
-    public RoomMapService(RoomRepository roomRepository, RoomCategoryRepository categoryRepository) {
+    private final JdbcTemplate jdbc;
+
+    public RoomMapService(RoomRepository roomRepository, RoomCategoryRepository categoryRepository, JdbcTemplate jdbc) {
         this.roomRepository = roomRepository;
         this.categoryRepository = categoryRepository;
+        this.jdbc = jdbc;
     }
 
     @Transactional(readOnly = true)
@@ -142,6 +147,19 @@ public class RoomMapService {
             voucherCode = "V-2026-" + (r.getId() + 100);
             checkIn = "2026-10-20";
             checkOut = "2026-11-05";
+            // реальное проживание из броней: текущая путёвка в статусе CHECKED_IN
+            List<String[]> stay = jdbc.query("""
+                    SELECT v.id, c.last_name || ' ' || c.first_name, b.check_in, b.check_out
+                      FROM bookings b JOIN vouchers v ON v.id = b.voucher_id JOIN clients c ON c.id = v.client_id
+                     WHERE b.room_id = ? AND b.status = 'CHECKED_IN' AND b.check_in <= CURRENT_DATE AND b.check_out > CURRENT_DATE
+                     ORDER BY b.check_in DESC LIMIT 1
+                    """, (rs, n) -> new String[]{rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)}, r.getId());
+            if (!stay.isEmpty()) {
+                guestName = stay.get(0)[1];
+                voucherCode = "№" + stay.get(0)[0];
+                checkIn = stay.get(0)[2];
+                checkOut = stay.get(0)[3];
+            }
         }
 
         return new InteractiveRoomView(

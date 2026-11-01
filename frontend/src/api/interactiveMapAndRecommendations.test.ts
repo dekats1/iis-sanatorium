@@ -143,8 +143,11 @@ describe('Interactive Room Map & Smart Recommendations Services (Java Spring Boo
     for (let catId = 1; catId <= 5; catId++) {
       const media = CATEGORY_MEDIA[catId];
       expect(media).toBeDefined();
-      expect(media.cover).toContain('https://images.unsplash.com');
+      // Офлайн-источники: art:<categoryId>:<index>, RoomImage рисует их как SVG без сети
+      expect(media.cover).toBe(`art:${catId}:0`);
       expect(media.photos.length).toBeGreaterThanOrEqual(4);
+      expect(media.photos.every((p) => p.startsWith(`art:${catId}:`))).toBe(true);
+      expect(new Set(media.photos).size).toBe(media.photos.length);
     }
 
     fetchMock.mockResolvedValueOnce(respond(200, mockRooms));

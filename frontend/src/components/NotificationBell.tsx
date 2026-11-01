@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { notifications } from '../api/endpoints';
 import type { AppNotification } from '../types';
+import { Icon, type IconName } from './icons';
 
 export function NotificationBell() {
   const [list, setList] = useState<AppNotification[]>([]);
@@ -65,109 +66,78 @@ export function NotificationBell() {
 
   const filteredList = list.filter((n) => (filter === 'unread' ? !n.read : true));
 
-  const getIcon = (type: AppNotification['type']) => {
+  const getIcon = (type: AppNotification['type']): IconName => {
     switch (type) {
       case 'PAYMENT':
-        return '💳';
+        return 'creditCard';
       case 'MEDICAL':
-        return '🩺';
+        return 'stethoscope';
       case 'LOYALTY':
-        return '⭐';
+        return 'star';
       case 'WAITLIST':
-        return '⏳';
+        return 'clock';
       default:
-        return '🔔';
+        return 'bell';
     }
   };
 
   return (
-    <div style={{ position: 'relative' }} ref={dropdownRef}>
+    <div className="notification-wrap" ref={dropdownRef}>
       <button
         type="button"
-        className="notification-bell-btn"
+        className="icon-btn notification-bell-btn"
         onClick={() => setIsOpen(!isOpen)}
         title="Центр уведомлений"
         aria-label="Уведомления"
+        aria-expanded={isOpen}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-        </svg>
+        <Icon name="bell" size={20} />
         {unreadCount > 0 && <span className="notification-badge-count">{unreadCount}</span>}
       </button>
 
       {isOpen && (
-        <div className="notification-dropdown">
+        <div className="notification-dropdown" role="dialog" aria-label="Центр уведомлений">
           <div className="notification-dropdown-header">
             <div>
-              <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 750 }}>Уведомления</h4>
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                {unreadCount > 0 ? `${unreadCount} новых` : 'Все прочитаны'}
-              </span>
+              <h4>Уведомления</h4>
+              <span className="notification-sub">{unreadCount > 0 ? `${unreadCount} новых` : 'Все прочитаны'}</span>
             </div>
             {unreadCount > 0 && (
-              <button
-                type="button"
-                className="link"
-                style={{ fontSize: '0.8rem', padding: 0 }}
-                onClick={markAllRead}
-              >
+              <button type="button" className="link notification-readall" onClick={markAllRead}>
                 Прочитать все
               </button>
             )}
           </div>
 
           <div className="notification-tabs">
-            <button
-              type="button"
-              className={`notification-tab-btn ${filter === 'all' ? 'active' : ''}`}
-              onClick={() => setFilter('all')}
-            >
+            <button type="button" className={`notification-tab-btn ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
               Все ({list.length})
             </button>
-            <button
-              type="button"
-              className={`notification-tab-btn ${filter === 'unread' ? 'active' : ''}`}
-              onClick={() => setFilter('unread')}
-            >
+            <button type="button" className={`notification-tab-btn ${filter === 'unread' ? 'active' : ''}`} onClick={() => setFilter('unread')}>
               Непрочитанные ({unreadCount})
             </button>
           </div>
 
           <div className="notification-dropdown-body">
             {filteredList.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)' }}>
-                <div style={{ fontSize: '1.8rem', marginBottom: 6 }}>📭</div>
-                <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>Новых уведомлений нет</div>
+              <div className="notification-empty">
+                <Icon name="inbox" size={32} />
+                <div>Новых уведомлений нет</div>
               </div>
             ) : (
               filteredList.map((n) => (
-                <div
-                  key={n.id}
-                  className={`notification-item ${!n.read ? 'unread' : ''}`}
-                  onClick={() => void handleNotificationClick(n)}
-                >
-                  <div className="notification-item-icon">{getIcon(n.type)}</div>
+                <div key={n.id} className={`notification-item ${!n.read ? 'unread' : ''}`} onClick={() => void handleNotificationClick(n)}>
+                  <div className="notification-item-icon"><Icon name={getIcon(n.type)} size={18} /></div>
                   <div className="notification-item-content">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <div className="notification-item-row">
                       <span className="notification-item-title">{n.title}</span>
-                      <button
-                        type="button"
-                        className="notification-item-del"
-                        onClick={(e) => void handleDelete(e, n.id)}
-                        title="Удалить"
-                      >
-                        ×
+                      <button type="button" className="notification-item-del" onClick={(e) => void handleDelete(e, n.id)} title="Удалить" aria-label="Удалить уведомление">
+                        <Icon name="close" size={14} />
                       </button>
                     </div>
                     <p className="notification-item-msg">{n.message}</p>
                     <span className="notification-item-time">
-                      {new Date(n.createdAt).toLocaleTimeString('ru-RU', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        day: 'numeric',
-                        month: 'short',
-                      })}
+                      {new Date(n.createdAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
                     </span>
                   </div>
                 </div>

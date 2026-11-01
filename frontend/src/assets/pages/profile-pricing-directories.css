@@ -1,0 +1,260 @@
+/* Стили раздела: profile-pricing-directories */
+
+/* ---------------- Профиль: шапка ---------------- */
+.profile-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+.profile-hero-avatar { flex: 0 1 400px; min-width: 0; max-width: 100%; }
+.profile-hero-skel { border-radius: var(--radius-pill); }
+.profile-hero-body { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.profile-hero-name { align-items: center; gap: var(--space-3); }
+.profile-hero-meta { margin: 0; }
+.profile-hero-stat {
+  flex: 0 1 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: var(--tap);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--accent-subtle);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: none;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.profile-hero-stat:hover { border-color: var(--primary); background: var(--accent-soft); }
+
+.profile-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+.profile-cards > .card { margin-bottom: 0; }
+
+/* ---------------- Профиль: карта лояльности ---------------- */
+.loyalty-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
+}
+.loyalty-card {
+  --tier: var(--primary);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-5);
+  min-height: 220px;
+  padding: var(--space-5);
+  border-radius: var(--radius-xl);
+  color: var(--on-primary);
+  background:
+    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--tier) 55%, transparent) 0%, transparent 60%),
+    linear-gradient(135deg, var(--primary-hover) 0%, color-mix(in srgb, var(--primary) 70%, var(--tier)) 100%);
+  box-shadow: var(--shadow-md);
+}
+.loyalty-card::after {
+  content: '';
+  position: absolute;
+  right: -60px;
+  bottom: -80px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  border: 28px solid color-mix(in srgb, var(--on-primary) 10%, transparent);
+  pointer-events: none;
+}
+.loyalty-card.tier-bronze { --tier: var(--terracotta); }
+.loyalty-card.tier-silver { --tier: var(--violet); }
+.loyalty-card.tier-gold { --tier: var(--warning); }
+.loyalty-card.tier-platinum { --tier: var(--text-subtle); }
+.loyalty-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); }
+.loyalty-card-brand { font-size: 0.8125rem; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.9; }
+.loyalty-card-tier { font-family: var(--font-head); font-size: 1.5rem; font-weight: 600; margin-top: 4px; }
+.loyalty-card-emblem {
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--on-primary) 18%, transparent);
+}
+.loyalty-card-balance { font-family: var(--font-head); font-size: clamp(2rem, 6vw, 2.75rem); font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.loyalty-card-caption { font-size: 0.8125rem; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.9; }
+.loyalty-card-foot { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); font-size: 0.875rem; font-weight: 600; }
+
+.loyalty-progress { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); }
+.loyalty-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary), var(--chart-3));
+  transition: width var(--t) var(--ease);
+}
+.loyalty-privileges { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.loyalty-privileges li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--ok-soft);
+  color: var(--ok);
+  border: 1px solid var(--ok-line);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.loyalty-amount { font-weight: 700; font-variant-numeric: tabular-nums; }
+.loyalty-amount.is-plus { color: var(--ok); }
+.loyalty-amount.is-minus { color: var(--danger); }
+
+/* ---------------- Профиль: медкарта ---------------- */
+.ehr-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.ehr-summary-diagnosis { font-weight: 700; font-size: 1.0625rem; color: var(--accent); }
+.ehr-alert {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--danger-line);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+}
+.ehr-alert-title { display: flex; align-items: center; gap: var(--space-2); font-weight: 700; color: var(--danger); }
+.ehr-alert-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ehr-alert-label { font-size: 0.875rem; font-weight: 600; color: var(--text); margin-right: 4px; }
+.ehr-vitals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: var(--space-3);
+}
+.ehr-vital {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.ehr-vital-head { display: flex; align-items: center; gap: 6px; font-size: 0.875rem; color: var(--text-muted); }
+.ehr-vital-head .icon { color: var(--accent); }
+.ehr-vital-value { font-family: var(--font-head); font-size: 1.375rem; font-weight: 600; color: var(--text-darker); font-variant-numeric: tabular-nums; }
+.ehr-vital-unit { font-family: var(--font-body); font-size: 0.8125rem; font-weight: 400; color: var(--text-muted); }
+.ehr-note {
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+}
+.ehr-note-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.ehr-note-section + .ehr-note-section { margin-top: var(--space-3); }
+.ehr-note-label { font-size: 0.8125rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+
+/* ---------------- Тарифы ---------------- */
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+  margin-bottom: var(--space-4);
+}
+.pricing-grid > .card { margin-bottom: 0; }
+.pricing-csv { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.875rem; resize: vertical; }
+
+.demand-chart svg { cursor: crosshair; touch-action: pan-y; }
+.demand-chart svg:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; border-radius: var(--radius-sm); }
+.demand-axis-line { stroke: var(--line-strong); stroke-width: 1; }
+.demand-today { stroke: var(--text-subtle); stroke-width: 1; stroke-dasharray: 3 4; }
+.demand-cursor { stroke: var(--line-strong); stroke-width: 1; }
+.demand-line { stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.demand-line.is-history { stroke: var(--chart-1); }
+.demand-line.is-forecast { stroke: var(--chart-2); stroke-dasharray: 7 5; }
+.demand-band { fill: var(--chart-2); fill-opacity: 0.16; stroke: none; }
+.demand-dot { stroke: var(--surface); stroke-width: 2; }
+.demand-dot.is-history { fill: var(--chart-1); }
+.demand-dot.is-forecast { fill: var(--chart-2); }
+.demand-swatch-history { background: var(--chart-1); }
+.demand-swatch-forecast { background: repeating-linear-gradient(90deg, var(--chart-2) 0 5px, transparent 5px 8px); border: 1px solid var(--chart-2); }
+.demand-swatch-band { background: color-mix(in srgb, var(--chart-2) 22%, transparent); border: 1px solid color-mix(in srgb, var(--chart-2) 50%, transparent); }
+.chart-tooltip .legend-swatch { width: 10px; height: 10px; }
+
+/* ---------------- Справочники ---------------- */
+.dir-layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.dir-main { margin-bottom: 0; min-width: 0; }
+.dir-nav {
+  position: sticky;
+  top: calc(var(--topbar-h) + var(--space-4));
+  padding: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.dir-nav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.dir-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--tap);
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: left;
+  box-shadow: none;
+}
+.dir-nav-item:hover:not(.is-active) { background: var(--bg-subtle); color: var(--text); }
+.dir-nav-item.is-active { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--primary) 35%, transparent); }
+.dir-nav-item .icon { flex-shrink: 0; }
+
+@media (max-width: 900px) {
+  .dir-layout { grid-template-columns: minmax(0, 1fr); }
+  .dir-nav { position: static; padding: 0; background: transparent; border: 0; box-shadow: none; }
+  .dir-nav ul { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: var(--space-2); padding-bottom: 4px; scrollbar-width: thin; }
+  .dir-nav-item { width: auto; white-space: nowrap; border-color: var(--line); border-radius: var(--radius-pill); background: var(--surface); }
+}
+
+/* ---------------- Администрирование ---------------- */
+.admin-roles { gap: 6px; min-width: 260px; }
+.admin-roles .chip { min-height: var(--tap); display: inline-flex; align-items: center; gap: 4px; }
+.admin-dir-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.admin-dir-grid > .card { margin-bottom: 0; }

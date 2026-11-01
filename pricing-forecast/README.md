@@ -43,7 +43,7 @@ alembic upgrade head
 открытый сид в проде):
 
 ```bash
-python -m pricing_forecast.cli seed        # один раз, на пустую БД
+python -m pricing_forecast.cli seed        # демо-данные: сезоны, тарифы, коридоры, 24 мес. истории, прогнозы, рекомендации (идемпотентно; в docker compose запускается само)
 python -m pricing_forecast.cli reseed       # пересоздать синтетические данные
 python -m pricing_forecast.cli forecast 1   # прогноз для категории 1 вручную
 ```

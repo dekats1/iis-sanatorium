@@ -7,53 +7,26 @@ import type {
 } from '../types';
 import { packagesApi } from './biAndOperations';
 
-// Качественный фотофонд категорий и номеров санатория (высокое разрешение, интерьеры, виды и санузлы)
+/** Число офлайн-кадров на категорию: спальня, гостиная зона, санузел, вид из окна. */
+const PHOTOS_PER_CATEGORY = 4;
+
+/** Офлайн-источник фото `art:<categoryId>:<index>` — RoomImage рисует его как SVG-иллюстрацию без сети. */
+export function artPhoto(categoryId: number, index: number): string {
+  return `art:${categoryId}:${index}`;
+}
+
+function categoryMedia(categoryId: number): { cover: string; photos: string[] } {
+  const photos = Array.from({ length: PHOTOS_PER_CATEGORY }, (_, i) => artPhoto(categoryId, i));
+  return { cover: photos[0], photos };
+}
+
+// Фотофонд категорий номеров санатория (офлайн-иллюстрации: интерьер, мебель, санузел, вид из окна)
 export const CATEGORY_MEDIA: Record<number, { cover: string; photos: string[] }> = {
-  1: {
-    cover: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=1000&q=80',
-    photos: [
-      'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1000&q=80',
-    ],
-  },
-  2: {
-    cover: 'https://images.unsplash.com/photo-1618773928121-c32242e63f39?auto=format&fit=crop&w=1000&q=80',
-    photos: [
-      'https://images.unsplash.com/photo-1618773928121-c32242e63f39?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1591088398332-8a7791972843?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1620626011761-996317b8d101?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1473448912268-2022ce9509d8?auto=format&fit=crop&w=1000&q=80',
-    ],
-  },
-  3: {
-    cover: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=1000&q=80',
-    photos: [
-      'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1507652313519-d4e9174996dd?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1000&q=80',
-    ],
-  },
-  4: {
-    cover: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1000&q=80',
-    photos: [
-      'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1513836279014-a89f7a76ae86?auto=format&fit=crop&w=1000&q=80',
-    ],
-  },
-  5: {
-    cover: 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=1000&q=80',
-    photos: [
-      'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1000&q=80',
-    ],
-  },
+  1: categoryMedia(1),
+  2: categoryMedia(2),
+  3: categoryMedia(3),
+  4: categoryMedia(4),
+  5: categoryMedia(5),
 };
 
 // ==========================================
@@ -122,7 +95,7 @@ export const HEALTH_GOALS: HealthGoalOption[] = [
   {
     id: 'CARDIO',
     title: 'Здоровое сердце и сосуды',
-    icon: '❤️',
+    icon: 'heart',
     description: 'Нормализация артериального давления, укрепление сосудов, восстановление ритма и профилактика инфарктов.',
     recommendedProfileId: 1,
     recommendedProfileName: 'Болезни системы кровообращения (Кардиологический)',
@@ -142,7 +115,7 @@ export const HEALTH_GOALS: HealthGoalOption[] = [
   {
     id: 'JOINTS',
     title: 'Легкие суставы и здоровая спина',
-    icon: '🦴',
+    icon: 'pulse',
     description: 'Снятие воспаления и боли в позвоночнике и суставах, улучшение подвижности при артрозах и остеохондрозе.',
     recommendedProfileId: 2,
     recommendedProfileName: 'Костно-мышечная система и суставы',
@@ -162,7 +135,7 @@ export const HEALTH_GOALS: HealthGoalOption[] = [
   {
     id: 'RESPIRATORY',
     title: 'Чистое дыхание и крепкий иммунитет',
-    icon: '🫁',
+    icon: 'waves',
     description: 'Очищение бронхов, реабилитация после пневмоний и бронхитов, укрепление местного иммунитета слизистых.',
     recommendedProfileId: 3,
     recommendedProfileName: 'Органы дыхания и пульмонология',
@@ -182,7 +155,7 @@ export const HEALTH_GOALS: HealthGoalOption[] = [
   {
     id: 'ANTISTRESS',
     title: 'Антистресс, крепкий сон и релакс',
-    icon: '🌿',
+    icon: 'leaf',
     description: 'Снятие эмоционального выгорания, лечение хронической усталости, восстановление фаз глубокого сна.',
     recommendedProfileId: 4,
     recommendedProfileName: 'Нервная система и эмоциональное восстановление',
@@ -202,7 +175,7 @@ export const HEALTH_GOALS: HealthGoalOption[] = [
   {
     id: 'DETOX_METABOLISM',
     title: 'Детокс, метаболизм и тонус',
-    icon: '✨',
+    icon: 'sparkles',
     description: 'Активация обмена веществ, мягкая очистка организма, нормализация уровня сахара и веса.',
     recommendedProfileId: 5,
     recommendedProfileName: 'Общеоздоровительный и велнес',
@@ -237,7 +210,7 @@ export const smartRecommendationsApi = {
     let matchScore = 95;
 
     if (input.hasMobilityIssue) {
-      floorNote = '⚠️ Рекомендован 1 этаж (без подъема по лестницам) для максимального комфорта.';
+      floorNote = 'Рекомендован 1 этаж (без подъема по лестницам) для максимального комфорта.';
       matchScore += 3;
     }
 

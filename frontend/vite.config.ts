@@ -12,11 +12,13 @@ const proxy: ProxyOptions = {
   headers: { Origin: GATEWAY },
 };
 
-export default defineConfig({
+// Ключи со слешем на конце: страница SPA /pricing (тарифы) не должна уходить на шлюз — только /pricing/... API.
+// В демо-режиме (--mode demo) запросы обслуживает встроенный мок, прокси не нужен.
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   server: {
     port: 5173,
     strictPort: true, // не уходить молча на 5174 при занятом порте: адрес должен быть предсказуемым
-    proxy: { '/api': proxy, '/pricing': proxy },
+    proxy: mode === 'demo' ? undefined : { '/api/': proxy, '/pricing/': proxy },
   },
-});
+}));

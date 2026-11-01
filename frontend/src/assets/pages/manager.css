@@ -1,0 +1,104 @@
+/* Стили раздела: manager (панель руководителя) */
+
+.mgr-page { min-width: 0; }
+.mgr-tabs { width: 100%; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.mgr-tabs .tabs { margin-bottom: 0; min-width: max-content; }
+
+.mgr-section-head h2 { margin: 0 0 4px; font-family: var(--font-head); font-size: 1.375rem; color: var(--text-darker); }
+
+/* Период KPI */
+.mgr-period { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-3) var(--space-4); margin-bottom: var(--space-3); }
+.mgr-period .inline { flex: 1 1 420px; justify-content: flex-end; }
+.mgr-period .inline .field { flex: 0 1 180px; }
+.mgr-period .chip, .chip-row > .chip { min-height: 44px; }
+
+.mgr-two-col { display: grid; grid-template-columns: minmax(min(100%, 300px), 1fr) minmax(0, 2fr); gap: var(--space-4); align-items: start; }
+.mgr-two-col > .card { margin-bottom: 0; min-width: 0; }
+@media (max-width: 1100px) {
+  .mgr-two-col { grid-template-columns: minmax(0, 1fr); }
+}
+
+.mgr-row-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.mgr-delta { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mgr-run-meta { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); margin: var(--space-4) 0 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--accent-soft); color: var(--accent); font-size: 0.9375rem; }
+.mgr-label { font-size: 0.8125rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: var(--space-2); }
+.mgr-code { font-size: 0.8125rem; padding: 2px 6px; border-radius: var(--radius-sm); background: var(--bg-subtle); color: var(--text); }
+.mgr-check { align-self: end; min-height: 44px; display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-4); }
+
+/* Графики */
+.mgr-chart svg:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; border-radius: var(--radius-sm); }
+.mgr-axis-title { font-size: 11px; fill: var(--text-subtle); }
+.mgr-line { fill: none; stroke: var(--chart-1); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.mgr-band { fill: var(--chart-1); fill-opacity: 0.14; stroke: none; }
+.mgr-target-line { stroke: var(--chart-3); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.mgr-crosshair { stroke: var(--text-subtle); stroke-width: 1; stroke-dasharray: 3 3; }
+.mgr-dot { fill: var(--surface); stroke: var(--chart-1); stroke-width: 3; }
+.mgr-hover-band { fill: var(--chart-grid); fill-opacity: 0.5; }
+.mgr-bar-fact { fill: var(--chart-1); }
+.mgr-bar-plan { fill: var(--chart-4); fill-opacity: 0.45; }
+.mgr-sw-1 { background: var(--chart-1); }
+.mgr-sw-2 { background: var(--chart-2); }
+.mgr-sw-4 { background: var(--chart-4); opacity: 0.6; }
+.mgr-sw-band { background: var(--chart-1); opacity: 0.25; }
+.mgr-sw-target { background: transparent; border-top: 2px dashed var(--chart-3); border-radius: 0; height: 0; vertical-align: 3px; }
+
+/* Горизонтальные столбцы каналов */
+.mgr-hbars { margin-bottom: var(--space-4); }
+.mgr-hbar-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.mgr-hbar-row { display: grid; grid-template-columns: minmax(90px, 180px) minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); font-size: 0.9375rem; }
+.mgr-hbar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.mgr-hbar-track { display: flex; height: 14px; border-radius: var(--radius-pill); background: var(--bg-subtle); overflow: hidden; }
+.mgr-hbar-seg { display: block; height: 100%; }
+.mgr-seg-1 { background: var(--chart-1); }
+.mgr-seg-2 { background: var(--chart-2); }
+.mgr-hbar-value { font-variant-numeric: tabular-nums; color: var(--text-muted); white-space: nowrap; }
+@media (max-width: 560px) {
+  .mgr-hbar-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .mgr-hbar-track { grid-column: 1 / -1; grid-row: 2; }
+}
+
+/* Полоса доли */
+.mgr-share { display: block; width: 100%; min-width: 80px; height: 8px; border-radius: var(--radius-pill); background: var(--bg-subtle); overflow: hidden; }
+.mgr-share-fill { display: block; height: 100%; border-radius: inherit; background: var(--chart-1); }
+.mgr-share-ok .mgr-share-fill { background: var(--ok); }
+.mgr-share-warn .mgr-share-fill { background: var(--warning); }
+.mgr-share-danger .mgr-share-fill { background: var(--danger); }
+.mgr-stock { display: grid; gap: 4px; min-width: 110px; }
+
+/* Сетка карточек (пакеты, персонал) */
+.mgr-card-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: var(--space-4); }
+.mgr-pkg, .mgr-staff { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-card); min-width: 0; }
+.mgr-pkg.is-hidden { background: var(--surface-alt); }
+.mgr-pkg-head, .mgr-staff-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-2); }
+.mgr-pkg h4, .mgr-staff h4 { margin: 0; font-family: var(--font-head); font-size: 1.0625rem; color: var(--text-darker); }
+.mgr-pkg-desc { margin: 0; color: var(--text-muted); font-size: 0.9375rem; }
+.mgr-proc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 0.9375rem; }
+.mgr-proc-list li { display: flex; align-items: center; gap: 6px; }
+.mgr-proc-list .icon { color: var(--ok); flex-shrink: 0; }
+.mgr-pkg-foot { margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: var(--space-3); }
+.mgr-price-old { color: var(--text-subtle); text-decoration: line-through; font-size: 0.875rem; }
+.mgr-price { font-family: var(--font-head); font-size: 1.375rem; font-weight: 700; color: var(--text-darker); }
+.mgr-staff .meta-list { margin: 0; }
+.mgr-staff .field select { min-height: 44px; }
+
+/* Качество */
+.mgr-rating { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mgr-rating .icon { color: var(--warning); }
+.mgr-dist-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 36px; align-items: center; gap: var(--space-2); }
+.mgr-reviews { list-style: none; margin: 0; padding: 0; }
+.mgr-review { padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); display: grid; gap: var(--space-3); }
+.mgr-review-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: var(--space-2) var(--space-4); }
+.mgr-criteria { display: flex; flex-wrap: wrap; gap: var(--space-2); font-size: 0.875rem; }
+.mgr-criteria > span { padding: 4px 10px; border-radius: var(--radius-pill); background: var(--bg-subtle); color: var(--text-muted); }
+.mgr-criteria strong { color: var(--text); }
+.mgr-proc-feedback { list-style: none; margin: 0; padding: 0; font-size: 0.875rem; }
+.mgr-proc-feedback li { padding: 4px 10px; border-radius: var(--radius-md); background: var(--accent-soft); color: var(--text); }
+.mgr-quote { margin: 0; padding-left: var(--space-3); border-left: 3px solid var(--line-strong); color: var(--text); font-style: italic; }
+.mgr-reply { padding: var(--space-3); border-radius: var(--radius-md); background: var(--info-soft); border: 1px solid var(--line); }
+.mgr-review-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); padding-top: var(--space-3); border-top: 1px dashed var(--line); }
+.mgr-reply-source { padding: var(--space-3); border-radius: var(--radius-md); background: var(--bg-subtle); margin-bottom: var(--space-4); }
+
+@media (max-width: 640px) {
+  .mgr-period .inline { justify-content: stretch; }
+  .mgr-period .inline .field, .mgr-period .inline .btn { flex: 1 1 100%; }
+}

@@ -1,0 +1,44 @@
+/* Остаточные стили доменных виджетов (используемые классы). */
+.loyalty-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.loyalty-card-balance {
+  margin: 18px 0;
+}
+
+.progress-track {
+  height: 10px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  margin: 12px 0 8px;
+  position: relative;
+}
+
+.ehr-vital-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text);
+  margin: 4px 0 2px;
+}
+
+.ehr-vital-unit {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.ehr-note-section {
+  margin-top: 10px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+@keyframes fadeInPhoto {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}

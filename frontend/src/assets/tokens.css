@@ -1,0 +1,104 @@
+/* Дизайн-токены. Светлая тема по умолчанию, тёмная — [data-theme="dark"]. */
+:root {
+  /* Бренд */
+  --primary: #0E7490;
+  --primary-hover: #155E75;
+  --primary-dark: #155E75;
+  --on-primary: #FFFFFF;
+  --accent: #0E7490;            /* цвет акцентного текста и ссылок */
+  --accent-hover: #155E75;
+  --accent-soft: #E0F2F7;
+  --accent-subtle: #F0F9FB;
+  --green: #16A34A;
+  --green-text: #15803D;
+
+  /* Нейтральные */
+  --bg: #F4F8F8;
+  --bg-subtle: #E8F1F6;
+  --muted: #E8F1F6;
+  --surface: #FFFFFF;
+  --surface-alt: #F8FBFB;
+  --surface-subtle: #F8FBFB;
+  --surface-muted: #E8F1F6;
+  --line: #D5E3E6;
+  --line-strong: #B4C8CE;
+  --text: #0F2A2E;
+  --text-darker: #0A1D20;
+  --text-muted: #475569;
+  --text-subtle: #5B6B7D;
+
+  /* Семантика (text — для текста на soft-фоне, ≥ 4.5:1) */
+  --ok: #166534;      --ok-soft: #DCFCE7;   --ok-line: #86D9A3;
+  --warning: #B45309; --warn: #B45309; --amber: #B45309;
+  --warning-soft: #FEF3C7; --amber-soft: #FEF3C7; --warn-line: #F3CD6A;
+  --danger: #DC2626;  --danger-soft: #FEE2E2; --danger-line: #F5A8A8;
+  --info: #0E7490;    --info-soft: #E0F2F7; --info-line: #8CCBDB;
+  --terracotta: #C2410C; --terracotta-soft: #FFEDD5;
+  --teal: #0E7490;    --teal-soft: #E0F2F7;
+  --violet: #4F5D75;  --violet-soft: #E8EDF4;
+
+  /* Графики (цветовая слепота: различаются и яркостью) */
+  --chart-1: #0E7490; --chart-2: #B45309; --chart-3: #15803D; --chart-4: #4F5D75; --chart-5: #BE185D;
+  --chart-grid: #DCE8EA;
+
+  /* Геометрия */
+  --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-xl: 24px; --radius-pill: 9999px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px;
+  --tap: 44px;
+
+  /* Тени Soft UI */
+  --shadow-sm: 0 1px 2px rgba(15, 42, 46, 0.06);
+  --shadow-card: 0 1px 2px rgba(15, 42, 46, 0.05), 0 4px 14px -4px rgba(15, 42, 46, 0.08);
+  --shadow-md: 0 2px 4px rgba(15, 42, 46, 0.06), 0 10px 24px -6px rgba(15, 42, 46, 0.12);
+  --shadow-hover: 0 4px 8px rgba(15, 42, 46, 0.06), 0 16px 32px -8px rgba(15, 42, 46, 0.16);
+  --shadow-float: 0 24px 56px -12px rgba(15, 42, 46, 0.28);
+  --ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--primary);
+
+  --sidebar-w: 264px;
+  --sidebar-w-collapsed: 76px;
+  --topbar-h: 64px;
+  --t-fast: 150ms; --t: 200ms; --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  --font-body: 'Source Sans 3', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --font-head: 'Lora', Georgia, 'Times New Roman', serif;
+
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --primary: #0E7490; --primary-hover: #1389A8; --primary-dark: #1389A8;
+  --accent: #5CC8E0; --accent-hover: #8EDAEB; --accent-soft: rgba(92, 200, 224, 0.14); --accent-subtle: rgba(92, 200, 224, 0.07);
+  --green: #4ADE80; --green-text: #4ADE80;
+
+  --bg: #0B1A1D; --bg-subtle: #132A2F; --muted: #16313A;
+  --surface: #11262A; --surface-alt: #152E33; --surface-subtle: #152E33; --surface-muted: #1A3840;
+  --line: #254249; --line-strong: #37595F;
+  --text: #E6F2F3; --text-darker: #FFFFFF; --text-muted: #A9C0C5; --text-subtle: #8CA5AB;
+
+  --ok: #4ADE80;      --ok-soft: rgba(74, 222, 128, 0.14);  --ok-line: rgba(74, 222, 128, 0.4);
+  --warning: #FBBF24; --warn: #FBBF24; --amber: #FBBF24;
+  --warning-soft: rgba(251, 191, 36, 0.14); --amber-soft: rgba(251, 191, 36, 0.14); --warn-line: rgba(251, 191, 36, 0.4);
+  --danger: #F87171;  --danger-soft: rgba(248, 113, 113, 0.14); --danger-line: rgba(248, 113, 113, 0.4);
+  --info: #5CC8E0;    --info-soft: rgba(92, 200, 224, 0.14); --info-line: rgba(92, 200, 224, 0.4);
+  --terracotta: #FB923C; --terracotta-soft: rgba(251, 146, 60, 0.14);
+  --teal: #5CC8E0; --teal-soft: rgba(92, 200, 224, 0.14);
+  --violet: #A9B8D0; --violet-soft: rgba(169, 184, 208, 0.14);
+
+  --chart-1: #38BDD8; --chart-2: #FBBF24; --chart-3: #4ADE80; --chart-4: #A9B8D0; --chart-5: #F472B6;
+  --chart-grid: #1F3A40;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 18px -6px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.4), 0 12px 28px -8px rgba(0, 0, 0, 0.6);
+  --shadow-hover: 0 4px 8px rgba(0, 0, 0, 0.4), 0 18px 36px -10px rgba(0, 0, 0, 0.65);
+  --shadow-float: 0 24px 56px -12px rgba(0, 0, 0, 0.7);
+  --ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}

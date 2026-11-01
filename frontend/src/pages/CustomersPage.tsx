@@ -1,128 +1,66 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { clients, directory, ehr, loyalty } from '../api/endpoints';
-import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  ErrorBox,
-  Field,
-  formatDateTime,
-  Modal,
-  SearchBar,
-  StatCard,
-  TableWrap,
-} from '../components/ui';
+import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
+import { clients, directory } from '../api/endpoints';
+import { DataTable, type Column } from '../components/DataTable';
+import { Badge, Button, Card, ErrorBox, Field, Modal, SearchBar, StatCard, Tabs, useConfirm, useToast } from '../components/ui';
+import { Icon } from '../components/icons';
+import { ClientCardModal } from '../components/customers/ClientCardModal';
+import { ClientFormFields, EMPTY_CLIENT, toRequest, type ClientFormState } from '../components/customers/ClientFormFields';
 import { useAuth } from '../hooks/useAuth';
-import type {
-  BonusTransaction,
-  ClientRequest,
-  ClientView,
-  Coded,
-  ConditionView,
-  Customer,
-  EhrRecord,
-  LoyaltyAccount,
-} from '../types';
+import type { ClientView, Coded, Customer } from '../types';
 
-const TYPE_NAMES: Record<string, string> = { ORG: 'Организация (Юрлицо)', PERSON: 'Физическое лицо' };
+const TYPE_NAMES: Record<string, string> = { ORG: 'Организация (юрлицо)', PERSON: 'Физическое лицо' };
 
-interface ClientFormState {
-  lastName: string;
-  firstName: string;
-  middleName: string;
-  birthDate: string;
-  phone: string;
-  email: string;
-  citizenship: string;
-}
-
-const EMPTY_CLIENT: ClientFormState = {
-  lastName: '',
-  firstName: '',
-  middleName: '',
-  birthDate: '',
-  phone: '',
-  email: '',
-  citizenship: '',
-};
-
-function clientToForm(c: ClientView): ClientFormState {
-  return {
-    lastName: c.lastName,
-    firstName: c.firstName,
-    middleName: c.middleName ?? '',
-    birthDate: c.birthDate,
-    phone: c.phone ?? '',
-    email: c.email ?? '',
-    citizenship: c.citizenship ?? '',
-  };
-}
-
-function toRequest(f: ClientFormState): ClientRequest {
-  return {
-    lastName: f.lastName,
-    firstName: f.firstName,
-    middleName: f.middleName || undefined,
-    birthDate: f.birthDate,
-    phone: f.phone || undefined,
-    email: f.email || undefined,
-    citizenship: f.citizenship || undefined,
-  };
-}
+type Section = 'clients' | 'customers';
 
 export default function CustomersPage() {
+  const toast = useToast();
+  const [ask, confirmDialog] = useConfirm();
   const { hasRole } = useAuth();
+  // Создание, правка и удаление заказчиков доступны только SYSADMIN (у BOOKING_ADMIN сервер отвечает 403).
   const canWrite = hasRole('SYSADMIN');
+  const createFormId = useId();
+  const customerFormId = useId();
 
-  const [activeSection, setActiveSection] = useState<'clients' | 'customers'>('clients');
+  const [activeSection, setActiveSection] = useState<Section>('clients');
   const [error, setError] = useState<unknown>(null);
-  const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Clients state
+  // Гости
   const [searchQuery, setSearchQuery] = useState('');
   const [clientList, setClientList] = useState<ClientView[]>([]);
+  const [clientsLoading, setClientsLoading] = useState(true);
   const [selectedClient, setSelectedClient] = useState<ClientView | null>(null);
-  const [clientTab, setClientTab] = useState<'profile' | 'ehr' | 'loyalty'>('profile');
-
-  // Edit / Create client
-  const [editForm, setEditForm] = useState<ClientFormState>(EMPTY_CLIENT);
+  const [allConditions, setAllConditions] = useState<Coded[]>([]);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newClientForm, setNewClientForm] = useState<ClientFormState>(EMPTY_CLIENT);
+  const [createError, setCreateError] = useState<unknown>(null);
 
-  // Conditions & EHR
-  const [conditions, setConditions] = useState<ConditionView[]>([]);
-  const [allConditions, setAllConditions] = useState<Coded[]>([]);
-  const [newConditionId, setNewConditionId] = useState('');
-  const [clientEhr, setClientEhr] = useState<EhrRecord | null>(null);
-
-  // Loyalty
-  const [clientLoyalty, setClientLoyalty] = useState<LoyaltyAccount | null>(null);
-  const [clientTransactions, setClientTransactions] = useState<BonusTransaction[]>([]);
-  const [bonusModalOpen, setBonusModalOpen] = useState(false);
-  const [bonusAmount, setBonusAmount] = useState('100');
-  const [bonusDescription, setBonusDescription] = useState('Поощрительное начисление баллов');
-
-  // Corporate customers state
+  // Корпоративные заказчики
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(true);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [custForm, setCustForm] = useState({ type: 'ORG' as Customer['type'], name: '', contractNo: '' });
   const [custEditId, setCustEditId] = useState<number | null>(null);
+  const [custError, setCustError] = useState<unknown>(null);
 
   const loadCustomers = useCallback(async () => {
     try {
       setCustomers(await directory.customers());
     } catch (err) {
       setError(err);
+    } finally {
+      setCustomersLoading(false);
     }
   }, []);
 
   const loadClients = useCallback(async (query = '') => {
+    setClientsLoading(true);
     try {
       setClientList(await clients.search(query));
     } catch (err) {
       setError(err);
+    } finally {
+      setClientsLoading(false);
     }
   }, []);
 
@@ -132,857 +70,335 @@ export default function CustomersPage() {
     directory.conditions().then(setAllConditions).catch(setError);
   }, [loadCustomers, loadClients]);
 
-  async function openClientModal(c: ClientView) {
-    setError(null);
-    setMessage('');
-    setSelectedClient(c);
-    setEditForm(clientToForm(c));
-    try {
-      const [full, conds, ehrData, lAcc, lTx] = await Promise.all([
-        clients.one(c.id),
-        clients.conditions(c.id),
-        ehr.get(c.id),
-        loyalty.account(c.id),
-        loyalty.transactions(c.id),
-      ]);
-      setSelectedClient(full);
-      setConditions(conds);
-      setClientEhr(ehrData);
-      setClientLoyalty(lAcc);
-      setClientTransactions(lTx);
-    } catch (err) {
-      setError(err);
-    }
-  }
-
-  async function saveClientProfile(e: FormEvent) {
-    e.preventDefault();
-    if (!selectedClient) return;
-    setError(null);
-    setMessage('');
-    setBusy(true);
-    try {
-      const updated = await clients.update(selectedClient.id, toRequest(editForm));
-      setSelectedClient(updated);
-      setMessage('Данные клиента успешно сохранены.');
-      await loadClients(searchQuery);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setBusy(false);
-    }
+  function openCreateClient() {
+    setCreateError(null);
+    setCreateModalOpen(true);
   }
 
   async function handleCreateClient(e: FormEvent) {
     e.preventDefault();
-    setError(null);
-    setMessage('');
+    setCreateError(null);
     setBusy(true);
     try {
       const created = await clients.create(toRequest(newClientForm));
       setNewClientForm(EMPTY_CLIENT);
       setCreateModalOpen(false);
-      setMessage(`Клиент ${created.lastName} ${created.firstName} успешно зарегистрирован (#${created.id}).`);
+      toast.success(`Гость ${created.lastName} ${created.firstName} зарегистрирован (№ ${created.id}).`);
       await loadClients();
-      await openClientModal(created);
+      setSelectedClient(created);
     } catch (err) {
-      setError(err);
+      setCreateError(err);
     } finally {
       setBusy(false);
     }
   }
 
-  async function addCondition() {
-    if (!selectedClient || !newConditionId) return;
-    setError(null);
-    setMessage('');
-    try {
-      await clients.addCondition(selectedClient.id, Number(newConditionId));
-      setNewConditionId('');
-      setConditions(await clients.conditions(selectedClient.id));
-      setMessage('Медицинское состояние добавлено в карту гостя.');
-    } catch (err) {
-      setError(err);
-    }
-  }
-
-  async function removeCondition(conditionId: number) {
-    if (!selectedClient) return;
-    setError(null);
-    setMessage('');
-    try {
-      await clients.removeCondition(selectedClient.id, conditionId);
-      setConditions(await clients.conditions(selectedClient.id));
-      setMessage('Медицинское состояние удалено.');
-    } catch (err) {
-      setError(err);
-    }
-  }
-
-  async function handleAddLoyaltyBonus(e: FormEvent) {
-    e.preventDefault();
-    if (!selectedClient) return;
-    setError(null);
-    try {
-      const amount = Number(bonusAmount);
-      await loyalty.addBonus(selectedClient.id, amount, bonusDescription);
-      const [lAcc, lTx] = await Promise.all([
-        loyalty.account(selectedClient.id),
-        loyalty.transactions(selectedClient.id),
-      ]);
-      setClientLoyalty(lAcc);
-      setClientTransactions(lTx);
-      setBonusModalOpen(false);
-      setMessage(`Гостю успешно начислено ${amount} бонусных баллов!`);
-    } catch (err) {
-      setError(err);
-    }
-  }
-
-  // Customer handlers
   function startCreateCustomer() {
     setCustEditId(null);
+    setCustError(null);
     setCustForm({ type: 'ORG', name: '', contractNo: '' });
     setCustomerModalOpen(true);
   }
 
   function startEditCustomer(c: Customer) {
     setCustEditId(c.id);
+    setCustError(null);
     setCustForm({ type: c.type, name: c.name, contractNo: c.contractNo ?? '' });
     setCustomerModalOpen(true);
   }
 
   async function saveCustomer(e: FormEvent) {
     e.preventDefault();
-    setError(null);
-    setMessage('');
+    if (!canWrite) return;
+    setCustError(null);
     setBusy(true);
     try {
       const body = { type: custForm.type, name: custForm.name, contractNo: custForm.contractNo || null };
       if (custEditId === null) {
         await directory.create('customers', body);
-        setMessage('Корпоративный заказчик успешно добавлен.');
+        toast.success('Корпоративный заказчик добавлен.');
       } else {
         await directory.update('customers', custEditId, body);
-        setMessage('Данные заказчика успешно обновлены.');
+        toast.success('Данные заказчика обновлены.');
       }
       setCustomerModalOpen(false);
       await loadCustomers();
     } catch (err) {
-      setError(err);
+      setCustError(err);
     } finally {
       setBusy(false);
     }
   }
 
   async function removeCustomer(c: Customer) {
-    if (!window.confirm(`Удалить заказчика «${c.name}»?`)) return;
+    if (!canWrite) return;
+    if (!(await ask({ title: 'Удаление заказчика', message: `Удалить заказчика «${c.name}»? Действие нельзя отменить.`, confirmLabel: 'Удалить', danger: true }))) return;
     setError(null);
-    setMessage('');
     try {
       await directory.remove('customers', c.id);
-      setMessage('Заказчик удалён.');
+      toast.success('Заказчик удалён.');
       await loadCustomers();
     } catch (err) {
       setError(err);
     }
   }
 
+  const clientColumns: Column<ClientView>[] = [
+    { key: 'id', header: 'ID', render: (c) => <span className="u-muted">№ {c.id}</span>, sortValue: (c) => c.id },
+    {
+      key: 'name',
+      header: 'ФИО гостя',
+      render: (c) => (
+        <span className="u-semibold">
+          {c.lastName} {c.firstName} {c.middleName ?? ''}
+        </span>
+      ),
+      sortValue: (c) => `${c.lastName} ${c.firstName}`,
+    },
+    { key: 'birth', header: 'Дата рождения', render: (c) => c.birthDate, sortValue: (c) => c.birthDate },
+    { key: 'phone', header: 'Телефон', render: (c) => c.phone || <span className="u-subtle">—</span>, sortValue: (c) => c.phone },
+    { key: 'email', header: 'Email', render: (c) => c.email || <span className="u-subtle">—</span>, sortValue: (c) => c.email },
+    { key: 'citizenship', header: 'Гражданство', render: (c) => c.citizenship || 'РБ', sortValue: (c) => c.citizenship },
+    {
+      key: 'actions',
+      header: 'Действия',
+      hideHeader: true,
+      align: 'right',
+      className: 'actions',
+      render: (c) => (
+        <Button
+          variant="outline"
+          size="sm"
+          icon={<Icon name="file" size={16} />}
+          onClick={(e) => {
+            e.stopPropagation();
+            setSelectedClient(c);
+          }}
+        >
+          Карточка
+        </Button>
+      ),
+    },
+  ];
+
+  const customerColumns: Column<Customer>[] = [
+    { key: 'id', header: 'ID', render: (c) => <span className="u-muted">№ {c.id}</span>, sortValue: (c) => c.id },
+    {
+      key: 'type',
+      header: 'Тип',
+      render: (c) => (
+        <Badge variant={c.type === 'ORG' ? 'info' : 'neutral'} icon={c.type === 'ORG' ? 'home' : 'user'}>
+          {TYPE_NAMES[c.type] ?? c.type}
+        </Badge>
+      ),
+      sortValue: (c) => c.type,
+    },
+    { key: 'name', header: 'Наименование', className: 'wrap', render: (c) => <span className="u-semibold">{c.name}</span>, sortValue: (c) => c.name },
+    {
+      key: 'contract',
+      header: 'Номер договора',
+      render: (c) => c.contractNo ?? <span className="u-subtle">Без договора</span>,
+      sortValue: (c) => c.contractNo,
+    },
+    ...(canWrite
+      ? [
+          {
+            key: 'actions',
+            header: 'Действия',
+            hideHeader: true,
+            align: 'right' as const,
+            className: 'actions',
+            render: (c: Customer) => (
+              <span className="u-inline-gap">
+                <Button variant="outline" size="sm" icon={<Icon name="edit" size={16} />} onClick={() => startEditCustomer(c)}>
+                  Править
+                </Button>
+                <Button variant="ghost" size="sm" icon={<Icon name="trash" size={16} />} onClick={() => void removeCustomer(c)} aria-label={`Удалить заказчика ${c.name}`}>
+                  Удалить
+                </Button>
+              </span>
+            ),
+          },
+        ]
+      : []),
+  ];
+
+  const withPhone = clientList.filter((c) => c.phone).length;
+  const withEmail = clientList.filter((c) => c.email).length;
+  const withContract = customers.filter((c) => c.contractNo).length;
+
   return (
     <section>
-      {/* Page Header */}
+      {confirmDialog}
       <div className="page-head">
         <div>
-          <h1>Гости и заказчики (CRM, EHR & Loyalty)</h1>
-          <p className="card-subtitle">
-            Управление профилями гостей, медицинскими картами (EHR), бонусами программы лояльности и договорами B2B
-          </p>
+          <h1>Гости и заказчики</h1>
+          <p className="page-subtitle">Профили гостей, медкарты, программа лояльности и договоры с организациями</p>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div className="page-actions">
           {activeSection === 'clients' ? (
-            <Button variant="primary" onClick={() => setCreateModalOpen(true)}>
-              + Новый гость
+            <Button variant="primary" icon={<Icon name="plus" size={18} />} onClick={openCreateClient}>
+              Новый гость
             </Button>
           ) : (
             canWrite && (
-              <Button variant="primary" onClick={startCreateCustomer}>
-                + Новый заказчик
+              <Button variant="primary" icon={<Icon name="plus" size={18} />} onClick={startCreateCustomer}>
+                Новый заказчик
               </Button>
             )
           )}
         </div>
+        <Tabs<Section>
+          label="Разделы базы гостей"
+          value={activeSection}
+          onChange={setActiveSection}
+          tabs={[
+            { id: 'clients', label: 'Физические лица', icon: 'users', count: clientList.length },
+            { id: 'customers', label: 'Корпоративные заказчики', icon: 'home', count: customers.length },
+          ]}
+        />
       </div>
 
       <ErrorBox error={error} />
-      {message && <p className="ok">{message}</p>}
 
-      {/* Tabs: Clients / Corporate Customers */}
-      <div className="tabs">
-        <button
-          type="button"
-          className={`tab ${activeSection === 'clients' ? 'active' : ''}`}
-          onClick={() => setActiveSection('clients')}
-        >
-          Физические лица ({clientList.length})
-        </button>
-        <button
-          type="button"
-          className={`tab ${activeSection === 'customers' ? 'active' : ''}`}
-          onClick={() => setActiveSection('customers')}
-        >
-          Корпоративные заказчики ({customers.length})
-        </button>
-      </div>
-
-      {/* SECTION 1: Clients */}
       {activeSection === 'clients' && (
         <>
           <div className="kpi-grid">
-            <StatCard label="Всего гостей в базе" value={clientList.length} color="c-blue" icon="👥" />
-            <StatCard label="Участников программы лояльности" value={clientList.length} color="c-teal" icon="⭐" />
-            <StatCard label="Заполненных мед. карт (EHR)" value={clientList.length} color="default" icon="🩺" />
+            <StatCard label="Гостей в выборке" value={clientsLoading ? '—' : clientList.length} color="c-blue" icon={<Icon name="users" size={20} />} />
+            <StatCard label="С телефоном" value={clientsLoading ? '—' : withPhone} color="c-teal" icon={<Icon name="phone" size={20} />} />
+            <StatCard label="С адресом email" value={clientsLoading ? '—' : withEmail} color="c-amber" icon={<Icon name="mail" size={20} />} />
           </div>
 
-          <Card title="База гостей санатория">
-            <div className="filter-toolbar">
-              <SearchBar
-                value={searchQuery}
-                onChange={(val) => {
-                  setSearchQuery(val);
-                  void loadClients(val);
-                }}
-                placeholder="Поиск по фамилии, имени, телефону..."
-              />
-              <Button variant="outline" size="sm" onClick={() => void loadClients(searchQuery)}>
-                Обновить
-              </Button>
-            </div>
-
-            <TableWrap>
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>ФИО Гостя</th>
-                    <th>Дата рождения</th>
-                    <th>Телефон</th>
-                    <th>Email</th>
-                    <th>Гражданство</th>
-                    <th style={{ textAlign: 'right' }}>Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {clientList.length === 0 ? (
-                    <tr>
-                      <td colSpan={7}>
-                        <EmptyState
-                          title="Гости не найдены"
-                          description="Попробуйте изменить поисковый запрос или добавьте нового гостя."
-                          action={
-                            <Button variant="primary" size="sm" onClick={() => setCreateModalOpen(true)}>
-                              Добавить гостя
-                            </Button>
-                          }
-                        />
-                      </td>
-                    </tr>
-                  ) : (
-                    clientList.map((c) => (
-                      <tr
-                        key={c.id}
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => void openClientModal(c)}
-                      >
-                        <td>
-                          <strong>#{c.id}</strong>
-                        </td>
-                        <td>
-                          <strong>
-                            {c.lastName} {c.firstName} {c.middleName ?? ''}
-                          </strong>
-                        </td>
-                        <td>{c.birthDate}</td>
-                        <td>{c.phone || <span style={{ color: 'var(--text-subtle)' }}>—</span>}</td>
-                        <td>{c.email || <span style={{ color: 'var(--text-subtle)' }}>—</span>}</td>
-                        <td>{c.citizenship || 'РБ'}</td>
-                        <td style={{ textAlign: 'right' }} className="actions" onClick={(e) => e.stopPropagation()}>
-                          <Button variant="outline" size="sm" onClick={() => void openClientModal(c)}>
-                            Карточка
-                          </Button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </TableWrap>
+          <Card title="База гостей санатория" subtitle="Нажмите на строку, чтобы открыть карточку гостя">
+            <DataTable
+              rows={clientList}
+              columns={clientColumns}
+              rowKey={(c) => c.id}
+              label="База гостей санатория"
+              loading={clientsLoading}
+              onRowClick={(c) => setSelectedClient(c)}
+              initialSort={{ key: 'name', dir: 'asc' }}
+              emptyTitle="Гости не найдены"
+              emptyDescription="Измените поисковый запрос или зарегистрируйте нового гостя."
+              emptyAction={
+                <Button variant="primary" size="sm" icon={<Icon name="plus" size={16} />} onClick={openCreateClient}>
+                  Добавить гостя
+                </Button>
+              }
+              toolbar={
+                <div className="dc-client-search">
+                  <SearchBar
+                    value={searchQuery}
+                    onChange={(val) => {
+                      setSearchQuery(val);
+                      void loadClients(val);
+                    }}
+                    placeholder="Фамилия, имя, телефон"
+                    label="Поиск гостей по фамилии, имени, телефону"
+                  />
+                  <Button variant="outline" icon={<Icon name="refresh" size={18} />} onClick={() => void loadClients(searchQuery)}>
+                    Обновить
+                  </Button>
+                </div>
+              }
+            />
           </Card>
         </>
       )}
 
-      {/* SECTION 2: Corporate Customers */}
       {activeSection === 'customers' && (
-        <Card title="Корпоративные заказчики и партнёры">
-          <p className="card-subtitle" style={{ marginBottom: 16 }}>
-            Юридические лица и организации, заключающие договоры на оздоровление сотрудников
-          </p>
-
-          <TableWrap>
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Тип заказчика</th>
-                  <th>Наименование организации / Партнёра</th>
-                  <th>Номер договора</th>
-                  {canWrite && <th style={{ textAlign: 'right' }}>Действия</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {customers.length === 0 ? (
-                  <tr>
-                    <td colSpan={canWrite ? 5 : 4}>
-                      <EmptyState title="Список заказчиков пуст" />
-                    </td>
-                  </tr>
-                ) : (
-                  customers.map((c) => (
-                    <tr key={c.id}>
-                      <td>#{c.id}</td>
-                      <td>
-                        <Badge variant={c.type === 'ORG' ? 'info' : 'neutral'}>
-                          {TYPE_NAMES[c.type] ?? c.type}
-                        </Badge>
-                      </td>
-                      <td>
-                        <strong>{c.name}</strong>
-                      </td>
-                      <td>{c.contractNo ?? <span style={{ color: 'var(--text-subtle)' }}>Без договора</span>}</td>
-                      {canWrite && (
-                        <td style={{ textAlign: 'right' }} className="actions">
-                          <Button variant="outline" size="sm" onClick={() => startEditCustomer(c)}>
-                            Править
-                          </Button>
-                          <Button variant="danger" size="sm" onClick={() => void removeCustomer(c)}>
-                            Удалить
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </TableWrap>
-        </Card>
+        <>
+          <div className="kpi-grid">
+            <StatCard label="Заказчиков" value={customersLoading ? '—' : customers.length} color="c-blue" icon={<Icon name="home" size={20} />} />
+            <StatCard label="С договором" value={customersLoading ? '—' : withContract} color="c-teal" icon={<Icon name="file" size={20} />} />
+          </div>
+          <Card title="Корпоративные заказчики и партнёры" subtitle="Организации, заключающие договоры на оздоровление сотрудников">
+            <DataTable
+              rows={customers}
+              columns={customerColumns}
+              rowKey={(c) => c.id}
+              label="Корпоративные заказчики"
+              loading={customersLoading}
+              searchText={(c) => `${c.name} ${c.contractNo ?? ''}`}
+              searchPlaceholder="Наименование или номер договора"
+              initialSort={{ key: 'name', dir: 'asc' }}
+              emptyTitle="Список заказчиков пуст"
+              emptyDescription={canWrite ? 'Добавьте первую организацию-партнёра.' : 'Заказчиков добавляет системный администратор.'}
+              emptyAction={
+                canWrite ? (
+                  <Button variant="primary" size="sm" icon={<Icon name="plus" size={16} />} onClick={startCreateCustomer}>
+                    Новый заказчик
+                  </Button>
+                ) : undefined
+              }
+            />
+          </Card>
+        </>
       )}
 
-      {/* Modal: Client Details (Profile, EHR, Loyalty) */}
-      <Modal
-        isOpen={selectedClient !== null}
+      <ClientCardModal
+        client={selectedClient}
+        allConditions={allConditions}
         onClose={() => setSelectedClient(null)}
-        title={
-          selectedClient
-            ? `Карточка гостя: ${selectedClient.lastName} ${selectedClient.firstName} (#${selectedClient.id})`
-            : ''
-        }
-        size="lg"
-      >
-        {selectedClient && (
-          <div>
-            <div className="tabs" style={{ margin: '0 0 18px' }}>
-              <button
-                type="button"
-                className={`tab ${clientTab === 'profile' ? 'active' : ''}`}
-                onClick={() => setClientTab('profile')}
-              >
-                Профиль и контакты
-              </button>
-              <button
-                type="button"
-                className={`tab ${clientTab === 'ehr' ? 'active' : ''}`}
-                onClick={() => setClientTab('ehr')}
-              >
-                Медкарта (EHR) & Диагнозы
-              </button>
-              <button
-                type="button"
-                className={`tab ${clientTab === 'loyalty' ? 'active' : ''}`}
-                onClick={() => setClientTab('loyalty')}
-              >
-                Лояльность ({clientLoyalty ? `${clientLoyalty.balance} б.` : '...'})
-              </button>
-            </div>
+        onSaved={() => loadClients(searchQuery)}
+      />
 
-            {/* TAB 1: Profile & Contacts */}
-            {clientTab === 'profile' && (
-              <form onSubmit={saveClientProfile}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-                  <Field label="Фамилия" required>
-                    <input
-                      value={editForm.lastName}
-                      required
-                      onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="Имя" required>
-                    <input
-                      value={editForm.firstName}
-                      required
-                      onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="Отчество">
-                    <input
-                      value={editForm.middleName}
-                      onChange={(e) => setEditForm({ ...editForm, middleName: e.target.value })}
-                    />
-                  </Field>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <Field label="Дата рождения" required>
-                    <input
-                      type="date"
-                      value={editForm.birthDate}
-                      required
-                      onChange={(e) => setEditForm({ ...editForm, birthDate: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="Гражданство">
-                    <input
-                      value={editForm.citizenship}
-                      onChange={(e) => setEditForm({ ...editForm, citizenship: e.target.value })}
-                    />
-                  </Field>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <Field label="Номер телефона">
-                    <input
-                      type="tel"
-                      value={editForm.phone}
-                      onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="Email">
-                    <input
-                      type="email"
-                      value={editForm.email}
-                      onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                    />
-                  </Field>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
-                  <Button type="button" variant="secondary" onClick={() => setSelectedClient(null)}>
-                    Закрыть
-                  </Button>
-                  <Button type="submit" variant="primary" disabled={busy}>
-                    Сохранить изменения
-                  </Button>
-                </div>
-              </form>
-            )}
-
-            {/* TAB 2: EHR & Conditions */}
-            {clientTab === 'ehr' && clientEhr && (
-              <div>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    background: 'var(--surface-alt)',
-                    padding: '12px 16px',
-                    borderRadius: 'var(--radius-md)',
-                    marginBottom: 16,
-                  }}
-                >
-                  <div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Санаторная карта:</span>
-                    <div style={{ fontWeight: 700, color: 'var(--accent)' }}>
-                      {clientEhr.sanatoriumCardNumber ?? 'СКК-2026/001'} (от {clientEhr.cardIssuedDate})
-                    </div>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Диагноз:</span>
-                    <div style={{ fontWeight: 600 }}>{clientEhr.mainDiagnosis || 'Оздоровление'}</div>
-                  </div>
-                  <div>
-                    <Badge variant="info">Диета: {clientEhr.dietCode || 'Стандарт'}</Badge>
-                  </div>
-                </div>
-
-                {/* Vitals preview */}
-                <div className="ehr-vitals-grid" style={{ marginBottom: 16 }}>
-                  <div className="ehr-vital-card">
-                    <span className="ehr-vital-label">АД (давление)</span>
-                    <div className="ehr-vital-value">
-                      {clientEhr.systolicBp ?? 120} / {clientEhr.diastolicBp ?? 80}
-                    </div>
-                  </div>
-                  <div className="ehr-vital-card">
-                    <span className="ehr-vital-label">Пульс</span>
-                    <div className="ehr-vital-value">{clientEhr.pulseBpm ?? 72} уд/мин</div>
-                  </div>
-                  <div className="ehr-vital-card">
-                    <span className="ehr-vital-label">Рост / Вес</span>
-                    <div className="ehr-vital-value">
-                      {clientEhr.heightCm} см / {clientEhr.weightKg} кг
-                    </div>
-                  </div>
-                  <div className="ehr-vital-card">
-                    <span className="ehr-vital-label">Группа крови</span>
-                    <div className="ehr-vital-value">{clientEhr.bloodType || 'A (II) Rh+'}</div>
-                  </div>
-                </div>
-
-                <h4 style={{ margin: '14px 0 8px', fontSize: '0.92rem' }}>Зарегистрированные состояния здоровья</h4>
-                <TableWrap>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Код МКБ</th>
-                        <th>Название состояния</th>
-                        <th>Дата</th>
-                        <th style={{ textAlign: 'right' }}>Действия</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {conditions.length === 0 ? (
-                        <tr>
-                          <td colSpan={4}>
-                            <EmptyState title="Состояния здоровья не зарегистрированы" />
-                          </td>
-                        </tr>
-                      ) : (
-                        conditions.map((c) => (
-                          <tr key={c.conditionId}>
-                            <td>{c.code}</td>
-                            <td>{c.name}</td>
-                            <td>{c.diagnosedAt ?? '—'}</td>
-                            <td style={{ textAlign: 'right' }} className="actions">
-                              <Button
-                                variant="danger"
-                                size="sm"
-                                onClick={() => void removeCondition(c.conditionId)}
-                              >
-                                Удалить
-                              </Button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </TableWrap>
-
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: 12,
-                    alignItems: 'flex-end',
-                    background: 'var(--surface-alt)',
-                    padding: 12,
-                    borderRadius: 'var(--radius-md)',
-                    marginTop: 12,
-                  }}
-                >
-                  <Field label="Добавить состояние в карту" style={{ margin: 0, flex: 1 }}>
-                    <select
-                      value={newConditionId}
-                      onChange={(e) => setNewConditionId(e.target.value)}
-                    >
-                      <option value="">— Выберите из классификатора —</option>
-                      {allConditions.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.code} — {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Button
-                    variant="primary"
-                    disabled={!newConditionId}
-                    onClick={() => void addCondition()}
-                  >
-                    + Добавить
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 3: Loyalty & Bonuses */}
-            {clientTab === 'loyalty' && clientLoyalty && (
-              <div>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    background: 'var(--surface-alt)',
-                    padding: '16px 20px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--line)',
-                    marginBottom: 16,
-                  }}
-                >
-                  <div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Уровень гостя:</span>
-                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--accent)' }}>
-                      {clientLoyalty.tierName} ({clientLoyalty.cashbackPercent}% кешбэк)
-                    </div>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Баланс бонусов:</span>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--ok)' }}>
-                      {clientLoyalty.balance.toLocaleString('ru-RU')} б.
-                    </div>
-                  </div>
-                  <div>
-                    <Button variant="primary" size="sm" onClick={() => setBonusModalOpen(true)}>
-                      + Начислить баллы
-                    </Button>
-                  </div>
-                </div>
-
-                <h4 style={{ margin: '14px 0 8px', fontSize: '0.92rem' }}>История бонусных начислений</h4>
-                <TableWrap>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Дата</th>
-                        <th>Тип</th>
-                        <th>Баллы</th>
-                        <th>Описание</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {clientTransactions.length === 0 ? (
-                        <tr>
-                          <td colSpan={4}>
-                            <EmptyState title="Транзакций пока нет" />
-                          </td>
-                        </tr>
-                      ) : (
-                        clientTransactions.map((tx) => (
-                          <tr key={tx.id}>
-                            <td>{formatDateTime(tx.createdAt)}</td>
-                            <td>
-                              <Badge variant={tx.amount > 0 ? 'good' : 'wait'}>
-                                {tx.type}
-                              </Badge>
-                            </td>
-                            <td
-                              style={{
-                                fontWeight: 700,
-                                color: tx.amount > 0 ? 'var(--ok)' : 'var(--danger)',
-                              }}
-                            >
-                              {tx.amount > 0 ? `+${tx.amount}` : tx.amount} б.
-                            </td>
-                            <td>{tx.description}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </TableWrap>
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
-
-      {/* Modal: Create Client */}
       <Modal
         isOpen={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         title="Регистрация нового гостя"
         size="md"
-      >
-        <form onSubmit={handleCreateClient}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="Фамилия" required>
-              <input
-                value={newClientForm.lastName}
-                required
-                placeholder="Смирнов"
-                onChange={(e) => setNewClientForm({ ...newClientForm, lastName: e.target.value })}
-              />
-            </Field>
-            <Field label="Имя" required>
-              <input
-                value={newClientForm.firstName}
-                required
-                placeholder="Алексей"
-                onChange={(e) => setNewClientForm({ ...newClientForm, firstName: e.target.value })}
-              />
-            </Field>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="Отчество">
-              <input
-                value={newClientForm.middleName}
-                placeholder="Сергеевич"
-                onChange={(e) => setNewClientForm({ ...newClientForm, middleName: e.target.value })}
-              />
-            </Field>
-            <Field label="Дата рождения" required>
-              <input
-                type="date"
-                value={newClientForm.birthDate}
-                required
-                onChange={(e) => setNewClientForm({ ...newClientForm, birthDate: e.target.value })}
-              />
-            </Field>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="Телефон">
-              <input
-                type="tel"
-                value={newClientForm.phone}
-                placeholder="+375 29 111-22-33"
-                onChange={(e) => setNewClientForm({ ...newClientForm, phone: e.target.value })}
-              />
-            </Field>
-            <Field label="Email">
-              <input
-                type="email"
-                value={newClientForm.email}
-                placeholder="client@mail.ru"
-                onChange={(e) => setNewClientForm({ ...newClientForm, email: e.target.value })}
-              />
-            </Field>
-          </div>
-
-          <Field label="Гражданство">
-            <input
-              value={newClientForm.citizenship}
-              placeholder="Республика Беларусь"
-              onChange={(e) => setNewClientForm({ ...newClientForm, citizenship: e.target.value })}
-            />
-          </Field>
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 10,
-              marginTop: 20,
-              paddingTop: 16,
-              borderTop: '1px solid var(--line)',
-            }}
-          >
-            <Button type="button" variant="secondary" onClick={() => setCreateModalOpen(false)}>
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setCreateModalOpen(false)}>
               Отмена
             </Button>
-            <Button type="submit" variant="primary" disabled={busy}>
+            <Button type="submit" form={createFormId} variant="primary" loading={busy}>
               Зарегистрировать гостя
             </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Modal: Manual Loyalty Bonus Accrual */}
-      <Modal
-        isOpen={bonusModalOpen}
-        onClose={() => setBonusModalOpen(false)}
-        title={`Начисление бонусов гостю #${selectedClient?.id ?? ''}`}
-        size="sm"
+          </>
+        }
       >
-        <form onSubmit={handleAddLoyaltyBonus}>
-          <Field label="Количество бонусных баллов" required hint="1 балл = 1 BYN">
-            <input
-              type="number"
-              min={1}
-              value={bonusAmount}
-              required
-              onChange={(e) => setBonusAmount(e.target.value)}
-            />
-          </Field>
-          <Field label="Причина начисления / Основание" required>
-            <input
-              value={bonusDescription}
-              required
-              onChange={(e) => setBonusDescription(e.target.value)}
-            />
-          </Field>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 10,
-              marginTop: 18,
-              paddingTop: 14,
-              borderTop: '1px solid var(--line)',
-            }}
-          >
-            <Button type="button" variant="secondary" onClick={() => setBonusModalOpen(false)}>
-              Отмена
-            </Button>
-            <Button type="submit" variant="primary">
-              Начислить
-            </Button>
-          </div>
+        <form id={createFormId} onSubmit={handleCreateClient}>
+          <ClientFormFields value={newClientForm} onChange={setNewClientForm} withPlaceholders />
+          <ErrorBox error={createError} />
         </form>
       </Modal>
 
-      {/* Modal: Customer Create/Edit */}
-      <Modal
-        isOpen={customerModalOpen}
-        onClose={() => setCustomerModalOpen(false)}
-        title={custEditId === null ? 'Новый корпоративный заказчик' : `Правка заказчика #${custEditId}`}
-        size="md"
-      >
-        <form onSubmit={saveCustomer}>
-          <Field label="Тип контрагента" required>
-            <select
-              value={custForm.type}
-              onChange={(e) => setCustForm({ ...custForm, type: e.target.value as Customer['type'] })}
-            >
-              <option value="ORG">Организация (Юридическое лицо)</option>
-              <option value="PERSON">Физическое лицо (Индивидуальный договор)</option>
-            </select>
-          </Field>
-          <Field label="Наименование организации" required>
-            <input
-              value={custForm.name}
-              required
-              placeholder="ОАО «Беларуськалий»"
-              onChange={(e) => setCustForm({ ...custForm, name: e.target.value })}
-            />
-          </Field>
-          <Field label="Номер договора">
-            <input
-              value={custForm.contractNo}
-              placeholder="Д-2026/01-САК"
-              onChange={(e) => setCustForm({ ...custForm, contractNo: e.target.value })}
-            />
-          </Field>
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 10,
-              marginTop: 20,
-              paddingTop: 16,
-              borderTop: '1px solid var(--line)',
-            }}
-          >
-            <Button type="button" variant="secondary" onClick={() => setCustomerModalOpen(false)}>
-              Отмена
-            </Button>
-            <Button type="submit" variant="primary" disabled={busy}>
-              Сохранить
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      {canWrite && (
+        <Modal
+          isOpen={customerModalOpen}
+          onClose={() => setCustomerModalOpen(false)}
+          title={custEditId === null ? 'Новый корпоративный заказчик' : `Правка заказчика № ${custEditId}`}
+          size="md"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setCustomerModalOpen(false)}>
+                Отмена
+              </Button>
+              <Button type="submit" form={customerFormId} variant="primary" loading={busy}>
+                Сохранить
+              </Button>
+            </>
+          }
+        >
+          <form id={customerFormId} onSubmit={saveCustomer}>
+            <Field label="Тип контрагента" required>
+              <select value={custForm.type} onChange={(e) => setCustForm({ ...custForm, type: e.target.value as Customer['type'] })}>
+                <option value="ORG">Организация (юридическое лицо)</option>
+                <option value="PERSON">Физическое лицо (индивидуальный договор)</option>
+              </select>
+            </Field>
+            <Field label="Наименование" required>
+              <input value={custForm.name} required placeholder="ОАО «Беларуськалий»" onChange={(e) => setCustForm({ ...custForm, name: e.target.value })} />
+            </Field>
+            <Field label="Номер договора">
+              <input value={custForm.contractNo} placeholder="Д-2026/01-САК" onChange={(e) => setCustForm({ ...custForm, contractNo: e.target.value })} />
+            </Field>
+            <ErrorBox error={custError} />
+          </form>
+        </Modal>
+      )}
     </section>
   );
 }

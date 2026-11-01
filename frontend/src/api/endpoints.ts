@@ -90,6 +90,11 @@ export const pricing = {
     post<{ id: number }>('/pricing/pricing-rules/corridors', r),
   seasons: (r: { name: string; date_from: string; date_to: string; k_season: number }) =>
     post<{ id: number }>('/pricing/pricing-rules/seasons', r),
+  listSeasons: () =>
+    get<{ id: number; name: string; date_from: string; date_to: string; k_season: number }[]>('/pricing/pricing-rules/seasons'),
+  listTariffs: (seasonId?: number, categoryId?: number) =>
+    get<{ id: number; season_id: number; category_id: number; price_base: number }[]>(
+      `/pricing/pricing-rules/tariffs${query({ season_id: seasonId, category_id: categoryId })}`),
   tariffs: (r: { season_id: number; category_id: number; price_base: number }) =>
     post<{ id: number }>('/pricing/pricing-rules/tariffs', r),
   history: (categoryId: number, from: string, to: string) =>

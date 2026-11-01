@@ -1,13 +1,39 @@
-import { useState, type FormEvent, useEffect } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { booking, waitlist, packages } from '../api/endpoints';
-import { ErrorBox, Field, money, today, Badge } from '../components/ui';
+import { Badge, Button, EmptyState, ErrorBox, Field, SkeletonRows, Tabs, money, today, useToast } from '../components/ui';
+import { Icon } from '../components/icons';
+import { RoomImage } from '../components/RoomArt';
 import { useAuth } from '../hooks/useAuth';
 import type { CategoryAvailability, SanatoriumPackage } from '../types';
 import InteractiveRoomMap from '../components/InteractiveRoomMap';
 import SmartRecommendationWidget from '../components/SmartRecommendationWidget';
 import PhotoGalleryModal from '../components/PhotoGalleryModal';
 import { CATEGORY_MEDIA } from '../api/interactiveMapAndRecommendations';
+
+type SortKey = 'price' | 'places' | 'name';
+
+function addDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Ближайшая пятница (включая сегодня). */
+function nextFriday(): string {
+  const d = new Date();
+  const delta = (5 - d.getDay() + 7) % 7;
+  return today(delta);
+}
+
+function nightsWord(n: number): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'ночь';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'ночи';
+  return 'ночей';
+}
 
 /** Поиск свободных мест (ФТ-05): карточки категорий, кнопка оформления всегда доступна, лист ожидания — только когда мест нет. */
 export default function SearchPage() {
@@ -19,23 +45,27 @@ export default function SearchPage() {
   const [places, setPlaces] = useState(1);
   const [result, setResult] = useState<CategoryAvailability[] | null>(null);
   const [packageList, setPackageList] = useState<SanatoriumPackage[]>([]);
-  const [galleryCategory, setGalleryCategory] = useState<{
-    name: string;
-    categoryId: number;
-    photos: string[];
-  } | null>(null);
+  const [galleryCategory, setGalleryCategory] = useState<{ name: string; categoryId: number; photos: string[] } | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const [info, setInfo] = useState('');
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [sort, setSort] = useState<SortKey>('price');
+  const [onlyAvailable, setOnlyAvailable] = useState(false);
 
   useEffect(() => {
     packages.list(true).then(setPackageList).catch(console.error);
   }, []);
 
+  const nights = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
+
+  function applyPreset(start: string, length: number) {
+    setFrom(start);
+    setTo(addDays(start, length));
+  }
+
   async function search(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    setInfo('');
     if (to <= from) {
       setError(new Error('Дата выезда должна быть позже даты заезда'));
       return;
@@ -55,7 +85,7 @@ export default function SearchPage() {
     setError(null);
     try {
       await waitlist.add({ categoryId, dateFrom: from, dateTo: to, places });
-      setInfo('Вы добавлены в лист ожидания: при освобождении мест путёвка будет предложена вам.');
+      toast.success('Вы добавлены в лист ожидания: при освобождении мест путёвка будет предложена вам.');
     } catch (err) {
       setError(err);
     }
@@ -64,95 +94,168 @@ export default function SearchPage() {
   const select = (c: CategoryAvailability) =>
     navigate(`/booking?category=${c.categoryId}&from=${from}&to=${to}&places=${places}`);
 
+  const visible = useMemo(() => {
+    if (!result) return null;
+    const list = onlyAvailable ? result.filter((c) => c.freePlaces >= places && c.maxPlacesInOneRoom >= places) : [...result];
+    list.sort((a, b) => {
+      if (sort === 'name') return a.name.localeCompare(b.name, 'ru');
+      if (sort === 'places') return b.freePlaces - a.freePlaces;
+      return (a.pricePerPlaceDay ?? Infinity) - (b.pricePerPlaceDay ?? Infinity);
+    });
+    return list;
+  }, [result, sort, onlyAvailable, places]);
+
+  const friday = nextFriday();
+
   return (
-    <section className="search-hero">
+    <section>
       <div className="page-head">
-        <h1>Бронирование и планирование</h1>
-        <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-          <button className={`tab-btn ${activeTab === 'SEARCH' ? 'active' : ''}`} onClick={() => setActiveTab('SEARCH')}>Поиск по датам</button>
-          <button className={`tab-btn ${activeTab === 'PACKAGES' ? 'active' : ''}`} onClick={() => setActiveTab('PACKAGES')}>Оздоровительные программы</button>
-          <button className={`tab-btn ${activeTab === 'MAP' ? 'active' : ''}`} onClick={() => setActiveTab('MAP')}>Карта номеров</button>
+        <div>
+          <h1>Поиск свободных номеров</h1>
+          <p className="page-subtitle">Бронирование и планирование: выберите даты, категорию номера или оздоровительную программу.</p>
         </div>
       </div>
 
+      <Tabs
+        label="Разделы бронирования"
+        value={activeTab}
+        onChange={setActiveTab}
+        tabs={[
+          { id: 'SEARCH', label: 'Поиск по датам', icon: 'search' },
+          { id: 'PACKAGES', label: 'Оздоровительные программы', icon: 'heart' },
+          { id: 'MAP', label: 'Карта номеров', icon: 'map' },
+        ]}
+      />
+
       {activeTab === 'SEARCH' && (
         <>
-          <form className="card inline" onSubmit={search}>
-            <Field label="Заезд"><input type="date" value={from} min={today()} onChange={(e) => setFrom(e.target.value)} required /></Field>
-            <Field label="Выезд"><input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} required /></Field>
-            <Field label="Мест">
-              <input type="number" min={1} max={4} value={places} onChange={(e) => setPlaces(Number(e.target.value))} required />
-            </Field>
-            <button type="submit" className="primary" disabled={busy}>Найти</button>
+          <form className="card search-form" onSubmit={search}>
+            <div className="inline">
+              <Field label="Заезд"><input type="date" value={from} min={today()} onChange={(e) => setFrom(e.target.value)} required /></Field>
+              <Field label="Выезд"><input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} required /></Field>
+              <Field label="Мест">
+                <input type="number" min={1} max={4} value={places} onChange={(e) => setPlaces(Number(e.target.value))} required />
+              </Field>
+              <Button type="submit" variant="primary" size="lg" loading={busy} icon={<Icon name="search" size={18} />}>Найти</Button>
+            </div>
+            <div className="preset-row" role="group" aria-label="Быстрый выбор дат">
+              <span className="preset-label">Быстрый выбор:</span>
+              <button type="button" className="chip" onClick={() => applyPreset(friday, 2)}>Выходные</button>
+              <button type="button" className="chip" onClick={() => applyPreset(today(7), 7)}>Неделя</button>
+              <button type="button" className="chip" onClick={() => applyPreset(today(7), 14)}>14 дней</button>
+              {nights > 0 && <span className="preset-summary"><Icon name="calendar" size={16} /> {nights} {nightsWord(nights)}</span>}
+            </div>
           </form>
-          <ErrorBox error={error} />
-          {info && <p className="ok">{info}</p>}
-          {result && (
-            <>
-              <p className="note">Найдено категорий: {result.length}. Нажмите «Оформить», чтобы перейти к бронированию выбранной категории.</p>
-              <div className="grid">
-                {result.map((c) => {
-                  const enough = c.freePlaces >= places && c.maxPlacesInOneRoom >= places;
-                  const media = CATEGORY_MEDIA[c.categoryId];
-                  const cover = c.coverUrl || media?.cover;
-                  const photos = c.photos || media?.photos || [];
 
-                  return (
-                    <article key={c.categoryId} className={`category-card cat-${c.categoryId} with-photo`}>
-                      {cover && (
-                        <div
+          <ErrorBox error={error} />
+
+          {busy && !result && <SkeletonRows rows={3} />}
+
+          {visible && result && (
+            <>
+              <div className="results-bar">
+                <p className="note">
+                  Найдено категорий: <strong>{visible.length}</strong>
+                  {visible.length !== result.length && ` из ${result.length}`}. Нажмите «Выбрать», чтобы перейти к оформлению выбранной категории.
+                </p>
+                <div className="results-controls">
+                  <label className="check">
+                    <input type="checkbox" checked={onlyAvailable} onChange={(e) => setOnlyAvailable(e.target.checked)} />
+                    Только с местами
+                  </label>
+                  <Field label="Сортировка" className="field-compact">
+                    <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+                      <option value="price">Сначала дешевле</option>
+                      <option value="places">Больше свободных мест</option>
+                      <option value="name">По названию</option>
+                    </select>
+                  </Field>
+                </div>
+              </div>
+
+              {visible.length === 0 ? (
+                <div className="card">
+                  <EmptyState
+                    title="Подходящих категорий нет"
+                    description="Измените даты или количество мест, либо снимите фильтр «Только с местами»."
+                    action={<Button onClick={() => setOnlyAvailable(false)}>Сбросить фильтр</Button>}
+                  />
+                </div>
+              ) : (
+                <div className="grid">
+                  {visible.map((c) => {
+                    const enough = c.freePlaces >= places && c.maxPlacesInOneRoom >= places;
+                    const media = CATEGORY_MEDIA[c.categoryId];
+                    const cover = c.coverUrl || media?.cover;
+                    const photos = c.photos || media?.photos || [];
+                    const total = c.priceAvailable && c.pricePerPlaceDay !== null ? c.pricePerPlaceDay * nights * places : null;
+
+                    return (
+                      <article key={c.categoryId} className={`category-card cat-${c.categoryId} with-photo`}>
+                        <button
+                          type="button"
                           className="category-photo-wrapper"
                           onClick={() => setGalleryCategory({ name: c.name, categoryId: c.categoryId, photos })}
-                          title="Нажмите, чтобы просмотреть все фотографии номера"
+                          aria-label={`Фотографии номера ${c.name}`}
+                          disabled={photos.length === 0}
                         >
-                          <img src={cover} alt={c.name} className="category-photo-img" loading="lazy" />
-                          <div className="category-photo-overlay-hint">
-                            <span>🔍 Просмотреть фото ({photos.length})</span>
+                          <RoomImage src={cover} seed={c.categoryId} className="category-photo-img" />
+                          <span className="category-photo-count"><Icon name="camera" size={14} /> {photos.length} фото</span>
+                        </button>
+                        <div className="category-card-body">
+                          <div className="category-card-title">
+                            <h3>{c.name}</h3>
+                            {enough ? (
+                              <Badge variant="good" icon="checkCircle">Есть места</Badge>
+                            ) : (
+                              <Badge variant="wait" icon="clock">Мест нет</Badge>
+                            )}
                           </div>
-                          <span className="category-photo-count">
-                            📷 {photos.length} фото
-                          </span>
+                          <p className="cc-places">
+                            Свободно мест: <strong>{c.freePlaces}</strong>
+                            {!enough && <span className="note"> (на {places} подходящего номера нет)</span>}
+                          </p>
+                          <div className="price-block">
+                            {c.priceAvailable ? (
+                              <>
+                                <p className="kpi-value">{money(c.pricePerPlaceDay)} <span className="per">/ сутки</span></p>
+                                {total !== null && nights > 0 && (
+                                  <p className="price-total-line">Итого за {nights} {nightsWord(nights)}, {places} {places === 1 ? 'место' : 'мест'}: <strong>{money(total)}</strong></p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="kpi-value kpi-pending">Цена уточняется при оформлении</p>
+                            )}
+                          </div>
+                          <div className="category-card-actions">
+                            {enough && (
+                              <Button variant="primary" onClick={() => select(c)} icon={<Icon name="arrowRight" size={18} />}>
+                                Выбрать
+                              </Button>
+                            )}
+                            {!enough && hasRole('CLIENT') && (
+                              <Button onClick={() => void joinWaitlist(c.categoryId)}>В лист ожидания</Button>
+                            )}
+                          </div>
                         </div>
-                      )}
-                      <div className="category-card-body">
-                        <h3>{c.name}</h3>
-                        <div style={{ marginBottom: 8 }}>
-                          <button
-                            type="button"
-                            className="view-photos-link-btn"
-                            onClick={() => setGalleryCategory({ name: c.name, categoryId: c.categoryId, photos })}
-                          >
-                            📷 Смотреть все фото ({photos.length})
-                          </button>
-                        </div>
-                        <p className="cc-places">
-                          Свободно мест: <strong>{c.freePlaces}</strong>
-                          {!enough && <span className="note"> (на {places} подходящего номера нет)</span>}
-                        </p>
-                        <p className="kpi-value">
-                          {c.priceAvailable ? `${money(c.pricePerPlaceDay)} / сутки` : 'Цена уточняется при оформлении'}
-                        </p>
-                        <div className="category-card-actions">
-                          {enough && (
-                            <button type="button" className="primary" onClick={() => select(c)}>
-                              Оформить бронирование
-                            </button>
-                          )}
-                          {!enough && hasRole('CLIENT') && (
-                            <button type="button" onClick={() => void joinWaitlist(c.categoryId)}>
-                              В лист ожидания
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
 
-          {/* Lightbox Photo Gallery Modal for Category */}
+          {!result && !busy && (
+            <div className="card">
+              <EmptyState
+                title="Выберите даты и нажмите «Найти»"
+                description="Мы покажем свободные категории номеров с ценой за сутки и итоговой стоимостью."
+                icon={<Icon name="bed" size={40} />}
+              />
+            </div>
+          )}
+
           {galleryCategory && (
             <PhotoGalleryModal
               isOpen={Boolean(galleryCategory)}
@@ -172,27 +275,30 @@ export default function SearchPage() {
       )}
 
       {activeTab === 'PACKAGES' && (
-        <div className="grid" style={{ marginTop: 20 }}>
-          {packageList.map((p) => (
-            <article key={p.id} className="card">
-              <Badge variant="primary">{p.badge}</Badge>
-              <h3>{p.name}</h3>
-              <p>{p.description}</p>
-              <p>Длительность: <strong>{p.durationNights} ночей</strong></p>
-              <p>Процедур: {p.includedProcedures.length}</p>
-              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '1.2rem', fontWeight: 800 }}>{money(p.packagePrice)}</span>
-                <button className="primary" onClick={() => navigate(`/booking?category=${p.categoryId}&packageId=${p.id}&from=${today()}&to=${today(p.durationNights)}`)}>Выбрать пакет</button>
-              </div>
-            </article>
-          ))}
-        </div>
+        packageList.length === 0 ? (
+          <div className="card"><EmptyState title="Программы пока не опубликованы" description="Загляните позже или воспользуйтесь поиском по датам." /></div>
+        ) : (
+          <div className="grid">
+            {packageList.map((p) => (
+              <article key={p.id} className="card package-tile">
+                <Badge variant="primary" icon="sparkles">{p.badge}</Badge>
+                <h3>{p.name}</h3>
+                <p>{p.description}</p>
+                <ul className="meta-list">
+                  <li><Icon name="calendar" size={16} /> Длительность: <strong>{p.durationNights} {nightsWord(p.durationNights)}</strong></li>
+                  <li><Icon name="heart" size={16} /> Процедур: <strong>{p.includedProcedures.length}</strong></li>
+                </ul>
+                <div className="package-tile-foot">
+                  <span className="price-big">{money(p.packagePrice)}</span>
+                  <Button variant="primary" onClick={() => navigate(`/booking?category=${p.categoryId}&packageId=${p.id}&from=${today()}&to=${today(p.durationNights)}`)}>Выбрать пакет</Button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )
       )}
 
-      {activeTab === 'MAP' && (
-        <InteractiveRoomMap isAdmin={hasRole('BOOKING_ADMIN', 'SYSADMIN', 'MANAGER')} />
-      )}
+      {activeTab === 'MAP' && <InteractiveRoomMap isAdmin={hasRole('BOOKING_ADMIN', 'SYSADMIN', 'MANAGER')} />}
     </section>
   );
 }
-

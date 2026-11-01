@@ -1,0 +1,291 @@
+/* Стили раздела: doctor-customers (рабочее место врача, гости и заказчики). Префикс dc-. */
+
+.dc-eyebrow {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  margin-bottom: 2px;
+}
+
+.dc-section-title {
+  font-family: var(--font-head);
+  font-size: 1.125rem;
+  margin: 0 0 var(--space-3);
+}
+
+/* ---------- Назначения ---------- */
+.dc-voucher-field { flex: 0 1 220px; }
+.dc-patient-field { flex: 1 1 280px; }
+.dc-date-field { margin-bottom: 0; min-width: 180px; }
+.dc-date-field .field-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.dc-assign-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+.dc-assign-layout > .card,
+.dc-assign-list .card { margin-bottom: 0; }
+
+.dc-proc-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.dc-proc-row .field { margin-bottom: 0; }
+.dc-proc-select { flex: 1 1 220px; min-width: 0; }
+.dc-proc-count { flex: 0 0 104px; }
+.dc-proc-remove { min-width: 44px; min-height: 44px; color: var(--danger); }
+
+.dc-proc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.dc-proc-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px dashed var(--line);
+}
+.dc-proc-list li:last-child { border-bottom: 0; }
+
+/* ---------- Предупреждения (противопоказания, аллергии) ---------- */
+.dc-alert {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  color: var(--text);
+}
+.dc-alert-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  color: var(--danger);
+}
+.dc-alert-list { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.dc-alert > .btn { justify-self: start; }
+
+.dc-tag-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dc-tag-label { font-size: 0.875rem; font-weight: 600; color: var(--text-muted); margin-right: 4px; }
+.dc-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.dc-tag.is-danger { color: var(--danger); border-color: var(--danger-line); }
+.dc-tag.is-warning { color: var(--warning); border-color: var(--warn-line); }
+
+/* ---------- Медкарта (EHR) ---------- */
+.dc-patient-select { max-width: 560px; }
+.dc-ehr { display: grid; gap: var(--space-4); }
+.dc-ehr-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.dc-ehr-head > div { min-width: 0; }
+.dc-ehr-card-no {
+  display: block;
+  font-family: var(--font-head);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.dc-vitals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: var(--space-3);
+}
+.dc-vital {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+.dc-vital-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+.dc-vital-label .icon { color: var(--accent); flex-shrink: 0; }
+.dc-vital-value {
+  font-size: 1.25rem;
+  font-weight: 650;
+  color: var(--text-darker);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.dc-vital-unit { margin-left: 4px; font-size: 0.8125rem; font-weight: 500; color: var(--text-subtle); }
+.dc-vital-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.dc-vital-status.is-ok { color: var(--ok); }
+.dc-vital-status.is-warn { color: var(--warning); }
+.dc-vital-status.is-bad { color: var(--danger); }
+
+/* Клинический дневник */
+.dc-note {
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.dc-note-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.dc-note-who { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.dc-note-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.dc-note-body { margin: 0; display: grid; gap: var(--space-3); }
+.dc-note-body dt {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  margin-bottom: 2px;
+}
+.dc-note-body dd { margin: 0; overflow-wrap: anywhere; }
+.dc-note-reco { color: var(--accent); font-weight: 550; }
+
+/* ---------- Гости и заказчики ---------- */
+.dc-client-search { display: flex; flex-wrap: wrap; gap: var(--space-2); flex: 1 1 320px; }
+.dc-client-search .search-bar { flex: 1 1 240px; }
+
+.dc-add-condition {
+  padding: var(--space-3);
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.dc-add-condition .field { flex: 1 1 260px; }
+
+/* Лояльность */
+.dc-loyalty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.dc-loyalty-tier { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.dc-loyalty-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-pill);
+  background: var(--warning-soft);
+  color: var(--warning);
+  flex-shrink: 0;
+}
+.dc-loyalty-name {
+  display: block;
+  font-family: var(--font-head);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+.dc-loyalty-balance { min-width: 0; }
+.dc-loyalty-value {
+  display: block;
+  font-family: var(--font-head);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--ok);
+  font-variant-numeric: tabular-nums;
+}
+.dc-loyalty-progress { flex: 1 1 100%; display: grid; gap: 6px; }
+.dc-progress {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  overflow: hidden;
+}
+.dc-progress-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 0.3s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dc-progress-bar { transition: none; }
+}
+
+.dc-privileges {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--space-2);
+}
+.dc-privileges li { display: flex; align-items: flex-start; gap: var(--space-2); font-size: 0.9375rem; }
+.dc-privileges .icon { color: var(--ok); margin-top: 3px; flex-shrink: 0; }
+
+@media (max-width: 560px) {
+  .dc-voucher-field,
+  .dc-patient-field { flex-basis: 100%; }
+  .dc-proc-count { flex: 1 1 auto; }
+  .dc-loyalty { padding: var(--space-4); }
+  .dc-ehr-head { flex-direction: column; align-items: flex-start; }
+}

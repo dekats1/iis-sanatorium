@@ -1,19 +1,33 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { interactiveRooms } from '../api/endpoints';
-import { CATEGORY_MEDIA } from '../api/interactiveMapAndRecommendations';
 import type { InteractiveRoom, RoomStatus } from '../types';
-import { Badge, Button, Modal, money } from './ui';
+import { Icon, type IconName } from './icons';
+import { RoomImage } from './RoomArt';
+import { Button, EmptyState, ErrorBox, Skeleton, money, useToast } from './ui';
+import RoomDetailsModal from './widgets/RoomDetailsModal';
+import { roomPhotos, roomStatusView, type RoomFilter, type RoomTone } from './widgets/roomStatus';
 
 interface InteractiveRoomMapProps {
   onSelectRoom?: (room: InteractiveRoom) => void;
   isAdmin?: boolean;
 }
 
+const FLOORS = [1, 2, 3];
+
+interface FilterChip {
+  id: RoomFilter;
+  label: string;
+  count: number;
+  tone?: RoomTone;
+  icon?: IconName;
+}
+
 export default function InteractiveRoomMap({ onSelectRoom, isAdmin = false }: InteractiveRoomMapProps) {
   const navigate = useNavigate();
+  const toast = useToast();
   const [floor, setFloor] = useState<number>(1);
-  const [statusFilter, setStatusFilter] = useState<RoomStatus | 'ALL' | 'UNAVAILABLE'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<RoomFilter>('ALL');
   const [rooms, setRooms] = useState<InteractiveRoom[]>([]);
   const [stats, setStats] = useState({
     total: 18,
@@ -24,16 +38,14 @@ export default function InteractiveRoomMap({ onSelectRoom, isAdmin = false }: In
     occupancyPercent: 22.2,
   });
   const [selectedRoom, setSelectedRoom] = useState<InteractiveRoom | null>(null);
-  const [galleryPhotoIdx, setGalleryPhotoIdx] = useState<number>(0);
   const [loading, setLoading] = useState(false);
-
-  const handleOpenRoomModal = (room: InteractiveRoom) => {
-    setSelectedRoom(room);
-    setGalleryPhotoIdx(0);
-  };
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const isFilterUnavailable = statusFilter === 'UNAVAILABLE';
       const [list, st] = await Promise.all([
@@ -46,23 +58,32 @@ export default function InteractiveRoomMap({ onSelectRoom, isAdmin = false }: In
       ]);
       setRooms(isFilterUnavailable ? list.filter((r) => r.status !== 'VACANT') : list);
       setStats(st);
+    } catch (e) {
+      setError(e);
     } finally {
       setLoading(false);
+      setLoaded(true);
     }
   };
 
   useEffect(() => {
-    loadData();
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floor, statusFilter, isAdmin]);
 
   const handleStatusChange = async (newStatus: RoomStatus) => {
     if (!selectedRoom || !isAdmin) return;
+    setStatusBusy(true);
     try {
       const updated = await interactiveRooms.updateStatus(selectedRoom.id, newStatus);
       setSelectedRoom(updated);
+      toast.success(newStatus === 'CLEANING' ? `Номер №${updated.roomNumber} отправлен на уборку` : `Номер №${updated.roomNumber} снова свободен`);
       await loadData();
     } catch (e) {
       console.error(e);
+      toast.error(e instanceof Error ? e.message : 'Не удалось изменить статус номера');
+    } finally {
+      setStatusBusy(false);
     }
   };
 
@@ -77,99 +98,61 @@ export default function InteractiveRoomMap({ onSelectRoom, isAdmin = false }: In
 
   const floorVacantCount = rooms.filter((r) => r.status === 'VACANT').length;
 
+  const chips: FilterChip[] = isAdmin
+    ? [
+        { id: 'ALL', label: 'Все', count: stats.total },
+        { id: 'VACANT', label: 'Свободен', count: stats.vacant, tone: 'good', icon: 'checkCircle' },
+        { id: 'OCCUPIED', label: 'Занят', count: stats.occupied, tone: 'bad', icon: 'user' },
+        { id: 'CLEANING', label: 'Уборка', count: stats.cleaning, tone: 'wait', icon: 'droplet' },
+        { id: 'RESERVED', label: 'Бронь', count: stats.reserved, tone: 'info', icon: 'calendar' },
+      ]
+    : [
+        { id: 'ALL', label: 'Все номера', count: stats.total },
+        { id: 'VACANT', label: 'Свободные для бронирования', count: stats.vacant, tone: 'good', icon: 'checkCircle' },
+        { id: 'UNAVAILABLE', label: 'Недоступные', count: stats.total - stats.vacant, tone: 'neutral', icon: 'lock' },
+      ];
+
+  const legend = chips.filter((c) => c.tone && c.icon);
+  const firstLoad = loading && !loaded;
+
   return (
-    <div className="room-map-wrapper">
-      {/* Controls: Floor selector and Status Legend */}
-      <div className="room-map-controls">
-        <div className="floor-nav">
-          {[1, 2, 3].map((f) => (
-            <button
-              key={f}
-              type="button"
-              className={`floor-nav-btn ${floor === f ? 'active' : ''}`}
-              onClick={() => setFloor(f)}
-            >
+    <div className="gx-map">
+      <div className="gx-map-controls">
+        <div className="gx-floor-switch" role="group" aria-label="Этаж корпуса">
+          {FLOORS.map((f) => (
+            <button key={f} type="button" className="gx-floor-btn" aria-pressed={floor === f} onClick={() => setFloor(f)}>
               {f} этаж
             </button>
           ))}
         </div>
 
-        <div className="room-status-legend">
-          {isAdmin ? (
-            /* Staff / Administrator Operational Legend */
-            <>
-              <span
-                className="legend-item"
-                style={{ fontWeight: statusFilter === 'ALL' ? 700 : 500 }}
-                onClick={() => setStatusFilter('ALL')}
-              >
-                Все ({stats.total})
-              </span>
-              <span
-                className="legend-item"
-                style={{ fontWeight: statusFilter === 'VACANT' ? 700 : 500 }}
-                onClick={() => setStatusFilter('VACANT')}
-              >
-                <span className="status-dot VACANT" /> Свободен ({stats.vacant})
-              </span>
-              <span
-                className="legend-item"
-                style={{ fontWeight: statusFilter === 'OCCUPIED' ? 700 : 500 }}
-                onClick={() => setStatusFilter('OCCUPIED')}
-              >
-                <span className="status-dot OCCUPIED" /> Занят ({stats.occupied})
-              </span>
-              <span
-                className="legend-item"
-                style={{ fontWeight: statusFilter === 'CLEANING' ? 700 : 500 }}
-                onClick={() => setStatusFilter('CLEANING')}
-              >
-                <span className="status-dot CLEANING" /> Уборка ({stats.cleaning})
-              </span>
-              <span
-                className="legend-item"
-                style={{ fontWeight: statusFilter === 'RESERVED' ? 700 : 500 }}
-                onClick={() => setStatusFilter('RESERVED')}
-              >
-                <span className="status-dot RESERVED" /> Бронь ({stats.reserved})
-              </span>
-            </>
-          ) : (
-            /* Client / Public Privacy Legend (152-ФЗ / GDPR) */
-            <>
-              <span
-                className="legend-item"
-                style={{ fontWeight: statusFilter === 'ALL' ? 700 : 500 }}
-                onClick={() => setStatusFilter('ALL')}
-              >
-                Все номера ({stats.total})
-              </span>
-              <span
-                className="legend-item"
-                style={{ fontWeight: statusFilter === 'VACANT' ? 700 : 500 }}
-                onClick={() => setStatusFilter('VACANT')}
-              >
-                <span className="status-dot VACANT" /> Свободные для бронирования ({stats.vacant})
-              </span>
-              <span
-                className="legend-item"
-                style={{ fontWeight: statusFilter === 'UNAVAILABLE' ? 700 : 500 }}
-                onClick={() => setStatusFilter('UNAVAILABLE')}
-              >
-                <span className="status-dot UNAVAILABLE" /> Недоступные ({stats.total - stats.vacant})
-              </span>
-            </>
-          )}
+        <div className="chip-row" role="group" aria-label="Фильтр по статусу номера">
+          {chips.map((c) => (
+            <button key={c.id} type="button" className="chip" aria-pressed={statusFilter === c.id} onClick={() => setStatusFilter(c.id)}>
+              {c.icon && <Icon name={c.icon} size={16} className={`gx-tone-ic tone-${c.tone}`} />}
+              {c.label} ({c.count})
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Schematic Floor Grid */}
-      <div className="floor-schematic">
-        <div className="building-header">
-          <div className="building-title">
-            <span>Главный спальный корпус — План {floor}-го этажа</span>
+      <section className="gx-floor card" aria-busy={loading || undefined} aria-label={`План ${floor}-го этажа`}>
+        <header className="gx-floor-head">
+          <div>
+            <h3 className="gx-floor-title">
+              <Icon name="map" size={18} /> Главный спальный корпус — План {floor}-го этажа
+            </h3>
+            <ul className="gx-legend" aria-label="Обозначения">
+              {legend.map((l) => (
+                <li key={l.id} className={`gx-legend-item tone-${l.tone}`}>
+                  <span className="gx-legend-swatch" aria-hidden="true" />
+                  <Icon name={l.icon as IconName} size={14} />
+                  {l.id === 'VACANT' ? 'Свободен' : l.id === 'UNAVAILABLE' ? 'Недоступен' : l.label}
+                </li>
+              ))}
+            </ul>
           </div>
-          <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+          <div className="gx-floor-summary">
             {isAdmin ? (
               <>
                 Загрузка: <strong>{stats.occupancyPercent}%</strong>
@@ -180,317 +163,109 @@ export default function InteractiveRoomMap({ onSelectRoom, isAdmin = false }: In
               </>
             )}
           </div>
-        </div>
+        </header>
 
-        {loading ? (
-          <p style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
-            Загрузка...
-          </p>
-        ) : rooms.length === 0 ? (
-          <p style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
-            Нет номеров по выбранному фильтру.
-          </p>
+        <ErrorBox error={error} />
+
+        {firstLoad ? (
+          <div className="gx-rooms" aria-hidden="true">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className="gx-room gx-room-skeleton">
+                <Skeleton height={120} className="gx-skel-photo" />
+                <div className="gx-room-body">
+                  <Skeleton width="40%" height={18} />
+                  <Skeleton width="80%" />
+                  <Skeleton width="60%" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : rooms.length === 0 && !error ? (
+          <EmptyState
+            title="Нет номеров по выбранному фильтру."
+            description={`На ${floor}-м этаже нет номеров с выбранным статусом. Попробуйте другой этаж или сбросьте фильтр.`}
+            icon={<Icon name="bed" size={40} />}
+            action={
+              statusFilter !== 'ALL' ? (
+                <Button variant="outline" onClick={() => setStatusFilter('ALL')}>
+                  Показать все номера
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
-          <div className="rooms-matrix">
+          <div className={`gx-rooms ${loading ? 'is-refreshing' : ''}`}>
             {rooms.map((room) => {
               const isVacant = room.status === 'VACANT';
-
-              // Text and badge variant: full staff details vs privacy-neutral for clients
-              let statusRu = isVacant ? 'Свободен' : 'Недоступен';
-              let statusVariant: 'success' | 'danger' | 'warning' | 'info' | 'neutral' = isVacant
-                ? 'success'
-                : 'neutral';
-
-              if (isAdmin) {
-                statusRu =
-                  room.status === 'VACANT'
-                    ? 'Свободен'
-                    : room.status === 'OCCUPIED'
-                    ? 'Занят'
-                    : room.status === 'CLEANING'
-                    ? 'Уборка'
-                    : 'Бронь';
-                statusVariant =
-                  room.status === 'VACANT'
-                    ? 'success'
-                    : room.status === 'OCCUPIED'
-                    ? 'danger'
-                    : room.status === 'CLEANING'
-                    ? 'warning'
-                    : 'info';
-              }
-
-              const cardClass = isAdmin
-                ? room.status
-                : isVacant
-                ? 'VACANT'
-                : 'client-unavailable';
-
-              const roomPhotos = room.photos && room.photos.length > 0 ? room.photos : CATEGORY_MEDIA[room.categoryId]?.photos || [];
-              const roomCover = roomPhotos[0];
+              const view = roomStatusView(room.status, isAdmin);
+              const photos = roomPhotos(room);
 
               return (
-                <div
+                <button
                   key={room.id}
-                  className={`room-card-interactive ${cardClass}`}
-                  onClick={() => handleOpenRoomModal(room)}
+                  type="button"
+                  className={`gx-room is-${view.key}`}
+                  onClick={() => setSelectedRoom(room)}
                   title={isVacant ? 'Выбрать номер' : 'Подробнее о номере'}
                 >
-                  {roomCover && (
-                    <div className="room-card-photo-header">
-                      <img src={roomCover} alt={room.categoryName} className="room-card-thumb-img" loading="lazy" />
-                      <span className="room-card-photo-badge">
-                        {roomPhotos.length} фото
+                  <span className="gx-room-photo">
+                    <RoomImage src={photos[0]} seed={room.categoryId} alt={room.categoryName} className="gx-room-img" />
+                    {photos.length > 0 && (
+                      <span className="gx-room-photo-count">
+                        <Icon name="camera" size={14} /> {photos.length} фото
                       </span>
-                    </div>
-                  )}
+                    )}
+                  </span>
 
-                  <div className="room-card-body-content">
-                    <div className="room-card-top">
-                      <span className="room-num-badge">
-                        № {room.roomNumber}
+                  <span className="gx-room-body">
+                    <span className="gx-room-top">
+                      <span className="gx-room-num">№ {room.roomNumber}</span>
+                      <span className={`badge ${view.tone}`}>
+                        <Icon name={view.icon} size={14} />
+                        {view.short}
                       </span>
-                      <Badge variant={statusVariant}>
-                        {statusRu}
-                      </Badge>
-                    </div>
+                    </span>
 
-                    <div className="room-category-name">{room.categoryName}</div>
+                    <span className="gx-room-cat">{room.categoryName}</span>
 
-                    <div className="room-card-meta">
-                      <div>Вместимость: {room.capacity} {room.capacity === 1 ? 'место' : 'места'}</div>
-                      <div>Вид: {room.windowView}</div>
-                      {/* Privacy: guest names are NEVER rendered to clients or public visitors */}
+                    <span className="gx-room-meta">
+                      <span><Icon name="users" size={14} /> {room.capacity} {room.capacity === 1 ? 'место' : 'места'}</span>
+                      <span><Icon name="mountain" size={14} /> {room.windowView}</span>
+                      {/* Конфиденциальность: имя гостя видит только персонал */}
                       {isAdmin && room.currentGuestName && (
-                        <div style={{ color: 'var(--text-darker)', fontWeight: 600 }}>
-                          {room.currentGuestName}
-                        </div>
+                        <span className="gx-room-guest"><Icon name="user" size={14} /> {room.currentGuestName}</span>
                       )}
-                    </div>
+                    </span>
 
-                    <div className="room-card-bottom">
-                      <span className="room-price-val">{money(room.pricePerDay)} / сут.</span>
-                      <Button variant="ghost" size="sm">
-                        {isVacant ? 'Выбрать →' : 'Инфо →'}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                    <span className="gx-room-bottom">
+                      <span className="gx-room-price">{money(room.pricePerDay)} / сут.</span>
+                      <span className="gx-room-cta">
+                        {isVacant ? 'Выбрать' : 'Инфо'} <Icon name="arrowRight" size={16} />
+                      </span>
+                    </span>
+                  </span>
+                </button>
               );
             })}
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Selected Room Details Modal */}
-      {selectedRoom && (() => {
-        const selectedPhotos = selectedRoom.photos && selectedRoom.photos.length > 0
-          ? selectedRoom.photos
-          : CATEGORY_MEDIA[selectedRoom.categoryId]?.photos || [];
-
-        return (
-          <Modal
-            isOpen={Boolean(selectedRoom)}
-            onClose={() => setSelectedRoom(null)}
-            title={`Номер №${selectedRoom.roomNumber} — ${selectedRoom.categoryName}`}
-            size="lg"
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                    {selectedRoom.building}, {selectedRoom.floor} этаж
-                  </span>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)' }}>
-                    {money(selectedRoom.pricePerDay)} <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>/ сутки</span>
-                  </div>
-                </div>
-                <Badge
-                  variant={
-                    isAdmin
-                      ? selectedRoom.status === 'VACANT'
-                        ? 'success'
-                        : selectedRoom.status === 'OCCUPIED'
-                        ? 'danger'
-                        : selectedRoom.status === 'CLEANING'
-                        ? 'warning'
-                        : 'info'
-                      : selectedRoom.status === 'VACANT'
-                      ? 'success'
-                      : 'neutral'
-                  }
-                >
-                  {isAdmin
-                    ? selectedRoom.status === 'VACANT'
-                      ? 'Свободен'
-                      : selectedRoom.status === 'OCCUPIED'
-                      ? 'Занят гостем'
-                      : selectedRoom.status === 'CLEANING'
-                      ? 'На санитарной уборке'
-                      : 'Забронирован'
-                    : selectedRoom.status === 'VACANT'
-                    ? 'Свободен для бронирования'
-                    : 'Недоступен для бронирования'}
-                </Badge>
-              </div>
-
-              {/* Interactive Photo Gallery with Viewport & Thumbnails */}
-              {selectedPhotos.length > 0 && (
-                <div className="room-modal-gallery">
-                  <div className="room-gallery-viewport">
-                    <img
-                      src={selectedPhotos[galleryPhotoIdx]}
-                      alt={`Фото номера ${selectedRoom.roomNumber} (${galleryPhotoIdx + 1})`}
-                      className="room-gallery-current-img"
-                    />
-                    {selectedPhotos.length > 1 && (
-                      <>
-                        <button
-                          type="button"
-                          className="gallery-nav-btn prev"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setGalleryPhotoIdx((i) => (i > 0 ? i - 1 : selectedPhotos.length - 1));
-                          }}
-                          title="Предыдущее фото"
-                        >
-                          ‹
-                        </button>
-                        <button
-                          type="button"
-                          className="gallery-nav-btn next"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setGalleryPhotoIdx((i) => (i < selectedPhotos.length - 1 ? i + 1 : 0));
-                          }}
-                          title="Следующее фото"
-                        >
-                          ›
-                        </button>
-                      </>
-                    )}
-                    <div className="gallery-counter-pill">
-                      {galleryPhotoIdx + 1} / {selectedPhotos.length}
-                    </div>
-                  </div>
-
-                  {selectedPhotos.length > 1 && (
-                    <div className="gallery-thumbs-row">
-                      {selectedPhotos.map((imgUrl, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          className={`gallery-thumb-item ${idx === galleryPhotoIdx ? 'active' : ''}`}
-                          onClick={() => setGalleryPhotoIdx(idx)}
-                          title={`Посмотреть фото ${idx + 1}`}
-                        >
-                          <img src={imgUrl} alt="" className="gallery-thumb-img" />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Polite privacy notice for clients if room is currently unavailable */}
-              {!isAdmin && selectedRoom.status !== 'VACANT' && (
-                <div
-                  style={{
-                    background: 'var(--surface-muted, #f8fafc)',
-                    border: '1px solid var(--line)',
-                    padding: 14,
-                    borderRadius: 8,
-                    fontSize: '0.88rem',
-                    color: 'var(--text-muted)',
-                    lineHeight: 1.5,
-                  }}
-                >
-                  Данный номер в настоящее время недоступен для бронирования. Вы можете ознакомиться с оснащением номера или выбрать любой из доступных свободных номеров на плане.
-                </div>
-              )}
-
-              {/* Room feature notes (only displayed if vacant or for staff) */}
-              {selectedRoom.notes && (isAdmin || selectedRoom.status === 'VACANT') && (
-                <div style={{ background: 'var(--bg-subtle)', padding: 12, borderRadius: 8, fontSize: '0.88rem' }}>
-                  <strong>Особенность:</strong> {selectedRoom.notes}
-                </div>
-              )}
-
-              <div>
-                <h4 style={{ fontSize: '0.95rem', marginBottom: 8 }}>Вид из окна</h4>
-                <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                  {selectedRoom.windowView}
-                </p>
-              </div>
-
-              <div>
-                <h4 style={{ fontSize: '0.95rem', marginBottom: 8 }}>Удобства</h4>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {selectedRoom.amenities.map((amenity, i) => (
-                    <Badge key={i} variant="neutral">
-                      {amenity}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-
-              {/* Current Guest placement info: PRIVACY-PROTECTED, ONLY FOR STAFF */}
-              {isAdmin && (selectedRoom.status === 'OCCUPIED' || selectedRoom.status === 'RESERVED') && (
-                <div style={{ background: 'var(--surface-muted, #f8fafc)', border: '1px solid var(--line)', padding: 14, borderRadius: 8 }}>
-                  <h4 style={{ fontSize: '0.95rem', margin: '0 0 8px 0', color: 'var(--text)' }}>
-                    Текущее размещение
-                  </h4>
-                  <div style={{ fontSize: '0.88rem', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div>Гость: <strong>{selectedRoom.currentGuestName || 'Не указан'}</strong></div>
-                    <div>Путёвка: <code>{selectedRoom.voucherCode || '—'}</code></div>
-                    <div>Период: {selectedRoom.checkInDate} — {selectedRoom.checkOutDate}</div>
-                  </div>
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-                {isAdmin && selectedRoom.status === 'CLEANING' && (
-                  <Button variant="outline" onClick={() => handleStatusChange('VACANT')}>
-                    Завершить уборку
-                  </Button>
-                )}
-
-                {isAdmin && selectedRoom.status === 'VACANT' && (
-                  <Button variant="outline" onClick={() => handleStatusChange('CLEANING')}>
-                    Назначить уборку
-                  </Button>
-                )}
-
-                {selectedRoom.status === 'VACANT' ? (
-                  <Button variant="primary" onClick={() => handleBookRoom(selectedRoom)}>
-                    Забронировать №{selectedRoom.roomNumber}
-                  </Button>
-                ) : !isAdmin ? (
-                  <>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setStatusFilter('VACANT');
-                        setSelectedRoom(null);
-                      }}
-                    >
-                      Показать свободные номера
-                    </Button>
-                    <Button variant="secondary" onClick={() => setSelectedRoom(null)}>
-                      Закрыть
-                    </Button>
-                  </>
-                ) : (
-                  <Button variant="secondary" onClick={() => setSelectedRoom(null)}>
-                    Закрыть
-                  </Button>
-                )}
-              </div>
-            </div>
-          </Modal>
-        );
-      })()}
+      {selectedRoom && (
+        <RoomDetailsModal
+          key={selectedRoom.id}
+          room={selectedRoom}
+          isAdmin={isAdmin}
+          busy={statusBusy}
+          onClose={() => setSelectedRoom(null)}
+          onBook={handleBookRoom}
+          onStatusChange={(s) => void handleStatusChange(s)}
+          onShowVacant={() => {
+            setStatusFilter('VACANT');
+            setSelectedRoom(null);
+          }}
+        />
+      )}
     </div>
   );
 }

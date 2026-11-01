@@ -13,16 +13,15 @@ test('клиент находит номер, оформляет путёвку 
   await choose.click();
 
   await expect(page.getByRole('heading', { name: 'Оформление путёвки' })).toBeVisible();
-  await page.getByRole('button', { name: 'Забронировать' }).click();
+  // Оформление создаёт путёвку и сразу уводит на страницу платёжного эмулятора.
+  await Promise.all([
+    page.waitForURL((url) => !url.pathname.startsWith('/booking')),
+    page.getByRole('button', { name: /Забронировать/ }).click(),
+  ]);
 
-  await expect(page.getByRole('heading', { name: /Путёвка №/ })).toBeVisible();
-  await expect(page.getByText('Ожидает оплаты')).toBeVisible();
-
-  await page.getByRole('button', { name: 'Перейти к оплате' }).click();
-  await expect(page.getByRole('link', { name: 'Открыть страницу оплаты' })).toBeVisible();
-
-  // путёвка появилась в личном кабинете
-  await page.getByRole('link', { name: 'Мои путёвки' }).click();
+  // путёвка появилась в личном кабинете и ожидает оплаты
+  await page.goto('/my');
+  await expect(page.getByText('Ожидает оплаты').first()).toBeVisible();
   await expect(page.getByRole('table', { name: /Путёвки клиента/ }).getByRole('row').nth(1)).toBeVisible();
 });
 

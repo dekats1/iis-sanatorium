@@ -232,6 +232,10 @@ export interface PriceReview {
 export interface ForecastPoint {
   stay_date: string;
   predicted_occ: number;
+  /** Нижняя граница 95% доверительного интервала, % (если сервис её вернул). */
+  lower_95?: number;
+  /** Верхняя граница 95% доверительного интервала, % (если сервис её вернул). */
+  upper_95?: number;
 }
 
 export interface ForecastRunResult {

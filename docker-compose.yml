@@ -48,7 +48,9 @@ services:
       PRICING_DATABASE_URL: postgresql+psycopg2://pricing:pricing@postgres:5432/sanatorium_pricing
       PRICING_JWT_SECRET: ${JWT_SECRET:-dev-only-shared-secret-change-me-0123456789}
       PRICING_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
-    command: sh -c "alembic upgrade head && uvicorn pricing_forecast.main:app --host 0.0.0.0 --port 8082"
+      PRICING_DEMO_SEED: ${PRICING_DEMO_SEED:-1}   # 1 — при старте идемпотентно наполнить демо-данными (CLI seed)
+    # демо-данные (идемпотентно): PRICING_DEMO_SEED=0 в .env отключает автозаполнение
+    command: sh -c "alembic upgrade head && if [ $${PRICING_DEMO_SEED:-1} = 1 ]; then python -m pricing_forecast.cli seed || true; fi && uvicorn pricing_forecast.main:app --host 0.0.0.0 --port 8082"
     ports:
       - "8082:8082"   # только для разработки (Swagger, отладка); снаружи доступ идёт через gateway — в проде порт убрать
 

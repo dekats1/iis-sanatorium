@@ -1,20 +1,14 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { booking, clients, directory, waitlist } from '../api/endpoints';
-import {
-  Button,
-  Card,
-  EmptyState,
-  ErrorBox,
-  Field,
-  formatDateTime,
-  Modal,
-  money,
-  SearchBar,
-  StatCard,
-  StatusBadge,
-  TableWrap,
-  today,
-} from '../components/ui';
+import { Button, Card, ErrorBox, money, StatCard, StatusBadge, Tabs, today, useConfirm, useToast } from '../components/ui';
+import { DataTable, type Column } from '../components/DataTable';
+import { Icon } from '../components/icons';
+import CreateVoucherModal, { validateVoucherForm, type VoucherForm } from '../components/bookings/CreateVoucherModal';
+import NewClientModal from '../components/bookings/NewClientModal';
+import VoucherDetailModal, { type VoucherAction } from '../components/bookings/VoucherDetailModal';
+import WaitlistModal from '../components/bookings/WaitlistModal';
+import { calculateNights, fullName, isFullyPaid, period } from '../components/bookings/bookingUtils';
 import type {
   ClientRequest,
   ClientView,
@@ -27,10 +21,26 @@ import type {
   WaitlistEntry,
 } from '../types';
 
+type StatusFilter = '' | 'AWAITING_PAYMENT' | 'CONFIRMED' | 'CHECKED_IN' | 'COMPLETED' | 'CANCELLED';
+
+const STATUS_TABS: { id: StatusFilter; label: string }[] = [
+  { id: '', label: 'Все' },
+  { id: 'AWAITING_PAYMENT', label: 'Ожидают оплаты' },
+  { id: 'CONFIRMED', label: 'Подтверждённые' },
+  { id: 'CHECKED_IN', label: 'Заселены' },
+  { id: 'COMPLETED', label: 'Завершены' },
+  { id: 'CANCELLED', label: 'Отменены' },
+];
+
+const EMPTY_CLIENT: ClientRequest = { lastName: '', firstName: '', middleName: '', birthDate: '', phone: '', email: '' };
+
 export default function AdminBookingsPage() {
+  const toast = useToast();
+  const [ask, confirmDialog] = useConfirm();
+  const [params, setParams] = useSearchParams();
   const [error, setError] = useState<unknown>(null);
-  const [message, setMessage] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
 
   // Modals state
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
@@ -48,31 +58,23 @@ export default function AdminBookingsPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [queue, setQueue] = useState<WaitlistEntry[]>([]);
 
-  // Vouchers list & filters
+  // Vouchers list & filter (фильтр по статусу — на клиенте, чтобы показывать счётчики вкладок)
   const [vouchers, setVouchers] = useState<VoucherView[]>([]);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('');
 
-  // Form states: New Voucher
-  const [clientId, setClientId] = useState('');
-  const [categoryId, setCategoryId] = useState('');
-  const [profileId, setProfileId] = useState('');
-  const [channelId, setChannelId] = useState('');
-  const [dietId, setDietId] = useState('');
-  const [customerId, setCustomerId] = useState('');
-  const [checkIn, setCheckIn] = useState(today(1));
-  const [checkOut, setCheckOut] = useState(today(7));
-  const [places, setPlaces] = useState(1);
-
-  // Form states: New Client
-  const [newClient, setNewClient] = useState<ClientRequest>({
-    lastName: '',
-    firstName: '',
-    middleName: '',
-    birthDate: '',
-    phone: '',
-    email: '',
+  // Forms
+  const [voucherForm, setVoucherForm] = useState<VoucherForm>({
+    clientId: '',
+    categoryId: '',
+    profileId: '',
+    channelId: '',
+    dietId: '',
+    customerId: '',
+    checkIn: today(1),
+    checkOut: today(7),
+    places: 1,
   });
+  const [newClient, setNewClient] = useState<ClientRequest>(EMPTY_CLIENT);
 
   const loadData = async () => {
     setLoading(true);
@@ -95,10 +97,12 @@ export default function AdminBookingsPage() {
       setChannels(chs);
       setCustomers(custs);
       setQueue(wl);
-
-      if (profs.length > 0 && !profileId) setProfileId(String(profs[0].id));
-      if (chs.length > 0 && !channelId) setChannelId(String(chs[0].id));
-      if (cats.length > 0 && !categoryId) setCategoryId(String(cats[0].id));
+      setVoucherForm((f) => ({
+        ...f,
+        profileId: f.profileId || (profs[0] ? String(profs[0].id) : ''),
+        channelId: f.channelId || (chs[0] ? String(chs[0].id) : ''),
+        categoryId: f.categoryId || (cats[0] ? String(cats[0].id) : ''),
+      }));
     } catch (err) {
       setError(err);
     } finally {
@@ -111,111 +115,100 @@ export default function AdminBookingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function runAction(fn: () => Promise<void>) {
+  // Возврат из банковского симулятора: ?pay=SUCCESS | DECLINED
+  const payResult = params.get('pay');
+  useEffect(() => {
+    if (!payResult) return;
+    if (payResult === 'SUCCESS') toast.success('Оплата успешно зачислена, путёвка подтверждена.');
+    else if (payResult === 'DECLINED') toast.warning('Платёж был отклонён банком. Его можно повторить, пока не истёк срок оплаты.');
+    void booking.all().then(setVouchers).catch(setError);
+    const next = new URLSearchParams(params);
+    next.delete('pay');
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payResult]);
+
+  async function runAction(key: string, fn: () => Promise<void>) {
     setError(null);
-    setMessage('');
+    setBusy(key);
     try {
       await fn();
     } catch (err) {
       setError(err);
+    } finally {
+      setBusy(null);
     }
   }
 
-  const clientName = (id: number) => {
-    const c = clientList.find((x) => x.id === id);
-    return c ? `${c.lastName} ${c.firstName} ${c.middleName ?? ''}`.trim() : `Клиент #${id}`;
-  };
-
-  const clientObj = (id: number) => clientList.find((x) => x.id === id);
-
-  const categoryName = (id: number | null | undefined) => {
-    if (!id) return 'Не указана';
-    return categories.find((c) => c.id === id)?.name ?? `Категория #${id}`;
-  };
+  const clientMap = useMemo(() => new Map(clientList.map((c) => [c.id, c])), [clientList]);
+  const clientObj = useCallback((id: number) => clientMap.get(id), [clientMap]);
+  const clientName = useCallback((id: number) => fullName(clientMap.get(id), id), [clientMap]);
+  const categoryName = useCallback(
+    (id: number | null | undefined) => {
+      if (!id) return 'Не указана';
+      return categories.find((c) => c.id === id)?.name ?? `Категория #${id}`;
+    },
+    [categories],
+  );
 
   const openVoucherDetail = async (v: VoucherView) => {
+    setError(null);
     setSelectedVoucher(v);
     setClientConditions([]);
     if (v.clientId) {
       try {
-        const conds = await clients.conditions(v.clientId);
-        setClientConditions(conds);
+        setClientConditions(await clients.conditions(v.clientId));
       } catch {
-        // ignore
+        // медицинские состояния необязательны для карточки
       }
     }
   };
 
-  const handleStatusFilterChange = (st: string) => {
-    setStatusFilter(st);
-    void runAction(async () => {
-      const list = await booking.all(st || undefined);
-      setVouchers(list);
-    });
-  };
+  const reloadVouchers = async () => setVouchers(await booking.all());
 
-  // Filtered vouchers by query
-  const filteredVouchers = useMemo(() => {
-    return vouchers.filter((v) => {
-      if (!searchQuery) return true;
-      const q = searchQuery.toLowerCase().trim();
-      const c = clientList.find((x) => x.id === v.clientId);
-      const guestName = c ? `${c.lastName} ${c.firstName} ${c.phone ?? ''}`.toLowerCase() : '';
-      const vId = String(v.id);
-      const room = (v.roomNumber ?? '').toLowerCase();
-      return vId.includes(q) || guestName.includes(q) || room.includes(q);
-    });
-  }, [vouchers, searchQuery, clientList]);
-
-  // Calculations for stats
-  const stats = useMemo(() => {
-    const total = vouchers.length;
-    const awaiting = vouchers.filter((v) => v.status === 'AWAITING_PAYMENT').length;
-    const checkedIn = vouchers.filter((v) => v.status === 'CHECKED_IN').length;
-    const confirmed = vouchers.filter((v) => v.status === 'CONFIRMED').length;
-    return { total, awaiting, checkedIn, confirmed };
+  // Counters & stats
+  const counts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const v of vouchers) m[v.status] = (m[v.status] ?? 0) + 1;
+    return m;
   }, [vouchers]);
 
-  // Validation for voucher form
-  const chosenCategory = categories.find((c) => String(c.id) === categoryId) ?? null;
-  const capacityExceeded = chosenCategory !== null && places > chosenCategory.capacityTotal;
-  const isVoucherFormValid =
-    Boolean(clientId) &&
-    Boolean(categoryId) &&
-    Boolean(profileId) &&
-    Boolean(channelId) &&
-    Boolean(checkIn) &&
-    Boolean(checkOut) &&
-    checkOut > checkIn &&
-    places >= 1 &&
-    !capacityExceeded;
+  const stats = {
+    total: vouchers.length,
+    awaiting: counts.AWAITING_PAYMENT ?? 0,
+    confirmed: counts.CONFIRMED ?? 0,
+    checkedIn: counts.CHECKED_IN ?? 0,
+  };
 
-  const handleCreateVoucher = (e: FormEvent) => {
-    e.preventDefault();
-    if (!isVoucherFormValid) return;
-    void runAction(async () => {
+  const visibleVouchers = useMemo(
+    () => (statusFilter ? vouchers.filter((v) => v.status === statusFilter) : vouchers),
+    [vouchers, statusFilter],
+  );
+
+  const handleCreateVoucher = () => {
+    if (!validateVoucherForm(voucherForm, categories).valid) return;
+    const f = voucherForm;
+    void runAction('createVoucher', async () => {
       const created = await booking.create({
-        clientId: Number(clientId),
-        categoryId: Number(categoryId),
-        checkIn,
-        checkOut,
-        places,
-        profileId: Number(profileId),
-        channelId: Number(channelId),
-        dietId: dietId ? Number(dietId) : undefined,
-        customerId: customerId ? Number(customerId) : undefined,
+        clientId: Number(f.clientId),
+        categoryId: Number(f.categoryId),
+        checkIn: f.checkIn,
+        checkOut: f.checkOut,
+        places: f.places,
+        profileId: Number(f.profileId),
+        channelId: Number(f.channelId),
+        dietId: f.dietId ? Number(f.dietId) : undefined,
+        customerId: f.customerId ? Number(f.customerId) : undefined,
       });
-      setMessage(`Путёвка № ${created.id} успешно оформлена!`);
+      toast.success(`Путёвка № ${created.id} успешно оформлена!`);
       setIsVoucherModalOpen(false);
-      const freshVouchers = await booking.all(statusFilter || undefined);
-      setVouchers(freshVouchers);
+      await reloadVouchers();
       await openVoucherDetail(created);
     });
   };
 
-  const handleCreateClient = (e: FormEvent) => {
-    e.preventDefault();
-    void runAction(async () => {
+  const handleCreateClient = () => {
+    void runAction('createClient', async () => {
       const created = await clients.create({
         lastName: newClient.lastName,
         firstName: newClient.firstName,
@@ -224,715 +217,283 @@ export default function AdminBookingsPage() {
         phone: newClient.phone || undefined,
         email: newClient.email || undefined,
       });
-      setMessage(`Клиент ${created.lastName} ${created.firstName} добавлен (ID #${created.id}).`);
-      setNewClient({ lastName: '', firstName: '', middleName: '', birthDate: '', phone: '', email: '' });
-      const freshClients = await clients.search('');
-      setClientList(freshClients);
-      setClientId(String(created.id)); // Auto-select for voucher creation
+      toast.success(`Клиент ${created.lastName} ${created.firstName} добавлен (ID #${created.id}).`);
+      setNewClient(EMPTY_CLIENT);
+      setClientList(await clients.search(''));
+      setVoucherForm((f) => ({ ...f, clientId: String(created.id) })); // автовыбор для оформления путёвки
       setIsClientModalOpen(false);
     });
   };
 
-  const handleVoucherAction = (actionFn: (id: number) => Promise<unknown>, successMsg: string) => {
-    if (!selectedVoucher) return;
-    void runAction(async () => {
-      await actionFn(selectedVoucher.id);
-      const fresh = await booking.one(selectedVoucher.id);
-      setSelectedVoucher(fresh);
-      const list = await booking.all(statusFilter || undefined);
-      setVouchers(list);
-      setMessage(successMsg);
+  const refreshSelected = async (id: number) => {
+    setSelectedVoucher(await booking.one(id));
+    await reloadVouchers();
+  };
+
+  const handleVoucherAction = async (action: VoucherAction) => {
+    const v = selectedVoucher;
+    if (!v) return;
+    if (action === 'cancel') {
+      const ok = await ask({
+        title: 'Отмена путёвки',
+        message: `Вы уверены, что хотите отменить путёвку № ${v.id}? Удержание рассчитывается по правилам отмены.`,
+        confirmLabel: 'Отменить путёвку',
+        danger: true,
+      });
+      if (!ok) return;
+      void runAction('cancel', async () => {
+        const res = await booking.cancel(v.id);
+        setSelectedVoucher(res.voucher);
+        await reloadVouchers();
+        toast.success(`Путёвка отменена. Удержано: ${money(res.retained)} (${res.retainPercent}%), к возврату: ${money(res.refund)}.`);
+      });
+      return;
+    }
+    if (action === 'checkOut') {
+      const ok = await ask({
+        title: 'Выселение гостя',
+        message: `Выселить гостя по путёвке № ${v.id}? Путёвка будет завершена.`,
+        confirmLabel: 'Выселить',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    void runAction(action, async () => {
+      if (action === 'checkIn') {
+        await booking.checkIn(v.id);
+        await refreshSelected(v.id);
+        toast.success('Гость успешно заселён в номер!');
+      } else if (action === 'checkOut') {
+        await booking.checkOut(v.id);
+        await refreshSelected(v.id);
+        toast.success('Гость успешно выселен!');
+      } else {
+        const p = await booking.pay(v.id);
+        if (p.payUrl) {
+          // Страница оплаты открывается в новой вкладке, администратор остаётся в системе.
+          window.open(p.payUrl, '_blank', 'noopener');
+          toast.info('Страница оплаты открыта в новой вкладке.');
+        } else {
+          toast.success('Оплата успешно зарегистрирована!');
+        }
+        await refreshSelected(v.id);
+      }
     });
   };
 
-  const handleCancelVoucher = () => {
-    if (!selectedVoucher) return;
-    if (!window.confirm(`Вы уверены, что хотите отменить путёвку № ${selectedVoucher.id}?`)) return;
-    void runAction(async () => {
-      const res = await booking.cancel(selectedVoucher.id);
-      setSelectedVoucher(res.voucher);
-      const list = await booking.all(statusFilter || undefined);
-      setVouchers(list);
-      setMessage(`Путёвка отменена. Удержано: ${money(res.retained)} (${res.retainPercent}%), к возврату: ${money(res.refund)}.`);
+  const handleRemoveFromWaitlist = async (entry: WaitlistEntry) => {
+    const ok = await ask({
+      title: 'Лист ожидания',
+      message: `Исключить ${clientName(entry.clientId)} из листа ожидания?`,
+      confirmLabel: 'Исключить',
+      danger: true,
+    });
+    if (!ok) return;
+    void runAction(`wl-${entry.id}`, async () => {
+      await waitlist.remove(entry.id);
+      setQueue(await waitlist.all('OPEN'));
+      toast.success('Запись исключена из листа ожидания.');
     });
   };
 
-  const handleRemoveFromWaitlist = (id: number) => {
-    void runAction(async () => {
-      await waitlist.remove(id);
-      const freshWl = await waitlist.all('OPEN');
-      setQueue(freshWl);
-      setMessage('Запись исключена из листа ожидания.');
-    });
-  };
+  const columns = useMemo<Column<VoucherView>[]>(
+    () => [
+      { key: 'id', header: '№ Путёвки', render: (v) => <strong>#{v.id}</strong>, sortValue: (v) => v.id },
+      {
+        key: 'guest',
+        header: 'Гость / Телефон',
+        className: 'wrap',
+        sortValue: (v) => clientName(v.clientId),
+        render: (v) => {
+          const c = clientObj(v.clientId);
+          return (
+            <>
+              <div className="u-semibold">{clientName(v.clientId)}</div>
+              <div className="u-muted-sm">{c?.phone || c?.email || 'Контакты не указаны'}</div>
+            </>
+          );
+        },
+      },
+      {
+        key: 'category',
+        header: 'Категория / Номер',
+        sortValue: (v) => categoryName(v.categoryId),
+        render: (v) => (
+          <>
+            <div>{categoryName(v.categoryId)}</div>
+            {v.roomNumber ? <span className="bk-room">Комната №{v.roomNumber}</span> : <span className="u-muted-sm">Без комнаты</span>}
+          </>
+        ),
+      },
+      {
+        key: 'dates',
+        header: 'Даты заезда',
+        sortValue: (v) => v.checkIn,
+        render: (v) => (
+          <div className="bk-cell-stack">
+            <span>{period(v.checkIn, v.checkOut)}</span>
+            <span className="u-muted-sm">{calculateNights(v.checkIn, v.checkOut)} ноч. · мест: {v.places ?? 1}</span>
+          </div>
+        ),
+      },
+      {
+        key: 'price',
+        header: 'Стоимость / Оплата',
+        align: 'right',
+        sortValue: (v) => v.totalPrice ?? 0,
+        render: (v) => (
+          <>
+            <div className="u-semibold">{money(v.totalPrice)}</div>
+            <div className={`bk-paid ${isFullyPaid(v) ? 'is-ok' : 'is-due'}`}>Оплачено: {money(v.paid)}</div>
+          </>
+        ),
+      },
+      { key: 'status', header: 'Статус', render: (v) => <StatusBadge status={v.status} />, sortValue: (v) => v.status },
+      {
+        key: 'actions',
+        header: 'Действия',
+        hideHeader: true,
+        className: 'actions',
+        render: (v) => (
+          <Button
+            size="sm"
+            variant="outline"
+            icon={<Icon name="eye" size={16} />}
+            aria-label={`Детали путёвки №${v.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              void openVoucherDetail(v);
+            }}
+          >
+            Детали
+          </Button>
+        ),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [clientName, clientObj, categoryName],
+  );
 
-  const calculateNights = (start: string | null, end: string | null) => {
-    if (!start || !end) return 0;
-    const diff = new Date(end).getTime() - new Date(start).getTime();
-    return Math.max(0, Math.round(diff / (1000 * 3600 * 24)));
-  };
+  const anyModalOpen = isVoucherModalOpen || isClientModalOpen || isWaitlistModalOpen || selectedVoucher !== null;
 
   return (
-    <section>
-      {/* Top Header */}
+    <section className="bk-page">
       <div className="page-head">
         <div>
           <h1>Управление бронированием</h1>
-          <p className="card-subtitle">
-            Оформление путёвок, регистрация гостей, заселение/выселение и работа с очередью
-          </p>
+          <p className="page-subtitle">Оформление путёвок, регистрация гостей, заселение/выселение и работа с очередью</p>
         </div>
-        <div className="row">
-          <Button variant="primary" onClick={() => setIsVoucherModalOpen(true)}>
-            + Оформить путёвку
+        <div className="page-actions">
+          <Button variant="primary" icon={<Icon name="plus" size={18} />} onClick={() => { setError(null); setIsVoucherModalOpen(true); }}>
+            Оформить путёвку
           </Button>
-          <Button variant="secondary" onClick={() => setIsClientModalOpen(true)}>
-            + Новый клиент
+          <Button variant="secondary" icon={<Icon name="user" size={18} />} onClick={() => { setError(null); setIsClientModalOpen(true); }}>
+            Новый клиент
           </Button>
-          <Button variant="outline" onClick={() => setIsWaitlistModalOpen(true)}>
+          <Button variant="outline" icon={<Icon name="clock" size={18} />} onClick={() => { setError(null); setIsWaitlistModalOpen(true); }}>
             Лист ожидания ({queue.length})
           </Button>
         </div>
       </div>
 
-      <ErrorBox error={error} />
-      {message && <p className="ok">{message}</p>}
+      {!anyModalOpen && <ErrorBox error={error} />}
 
-      {/* KPI Stats Grid */}
       <div className="kpi-grid">
-        <StatCard
-          label="Всего путёвок"
-          value={stats.total}
-          subvalue="В текущей выборке"
-          color="default"
-        />
-        <StatCard
-          label="Ожидают оплаты"
-          value={stats.awaiting}
-          subvalue="Требуют внимания"
-          color="c-amber"
-        />
-        <StatCard
-          label="Подтверждены"
-          value={stats.confirmed}
-          subvalue="Готовы к заезду"
-          color="c-blue"
-        />
-        <StatCard
-          label="Заселены в номера"
-          value={stats.checkedIn}
-          subvalue="Проживают сейчас"
-          color="c-teal"
-        />
+        <StatCard label="Всего путёвок" value={stats.total} subvalue="Во всех статусах" icon={<Icon name="ticket" size={20} />} />
+        <StatCard label="Ожидают оплаты" value={stats.awaiting} subvalue="Требуют внимания" color="c-amber" icon={<Icon name="creditCard" size={20} />} />
+        <StatCard label="Подтверждены" value={stats.confirmed} subvalue="Готовы к заезду" color="c-blue" icon={<Icon name="checkCircle" size={20} />} />
+        <StatCard label="Заселены в номера" value={stats.checkedIn} subvalue="Проживают сейчас" color="c-teal" icon={<Icon name="key" size={20} />} />
       </div>
 
-      {/* Search and Filters Toolbar */}
       <Card>
-        <div className="filter-toolbar">
-          <div className="tabs" style={{ margin: 0 }}>
-            <button
-              type="button"
-              className={`tab ${statusFilter === '' ? 'active' : ''}`}
-              onClick={() => handleStatusFilterChange('')}
-            >
-              Все
-            </button>
-            <button
-              type="button"
-              className={`tab ${statusFilter === 'AWAITING_PAYMENT' ? 'active' : ''}`}
-              onClick={() => handleStatusFilterChange('AWAITING_PAYMENT')}
-            >
-              Ожидают оплаты
-            </button>
-            <button
-              type="button"
-              className={`tab ${statusFilter === 'CONFIRMED' ? 'active' : ''}`}
-              onClick={() => handleStatusFilterChange('CONFIRMED')}
-            >
-              Подтверждённые
-            </button>
-            <button
-              type="button"
-              className={`tab ${statusFilter === 'CHECKED_IN' ? 'active' : ''}`}
-              onClick={() => handleStatusFilterChange('CHECKED_IN')}
-            >
-              Заселены
-            </button>
-            <button
-              type="button"
-              className={`tab ${statusFilter === 'COMPLETED' ? 'active' : ''}`}
-              onClick={() => handleStatusFilterChange('COMPLETED')}
-            >
-              Завершены
-            </button>
-            <button
-              type="button"
-              className={`tab ${statusFilter === 'CANCELLED' ? 'active' : ''}`}
-              onClick={() => handleStatusFilterChange('CANCELLED')}
-            >
-              Отменены
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <SearchBar
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder="Поиск по номеру, гостю, комнате..."
-            />
-            <Button variant="outline" size="sm" onClick={() => void loadData()} disabled={loading}>
+        <Tabs
+          label="Фильтр путёвок по статусу"
+          value={statusFilter}
+          onChange={setStatusFilter}
+          tabs={STATUS_TABS.map((t) => ({ ...t, count: t.id ? counts[t.id] ?? 0 : vouchers.length }))}
+        />
+        <DataTable
+          rows={visibleVouchers}
+          columns={columns}
+          rowKey={(v) => v.id}
+          caption="Путёвки санатория"
+          loading={loading}
+          searchText={(v) => {
+            const c = clientObj(v.clientId);
+            return `${v.id} ${clientName(v.clientId)} ${c?.phone ?? ''} ${c?.email ?? ''} ${v.roomNumber ?? ''}`;
+          }}
+          searchPlaceholder="Поиск по номеру путёвки, гостю, телефону"
+          initialSort={{ key: 'id', dir: 'desc' }}
+          onRowClick={(v) => void openVoucherDetail(v)}
+          rowClassName={(v) => (selectedVoucher?.id === v.id ? 'active-row' : undefined)}
+          toolbar={
+            <Button variant="ghost" size="sm" icon={<Icon name="refresh" size={16} />} loading={loading} onClick={() => void loadData()}>
               Обновить
             </Button>
-          </div>
-        </div>
-
-        {/* Vouchers Table */}
-        <TableWrap>
-          <table>
-            <thead>
-              <tr>
-                <th>№ Путёвки</th>
-                <th>Гость / Телефон</th>
-                <th>Категория / Номер</th>
-                <th>Даты заезда</th>
-                <th>Ночей</th>
-                <th>Мест</th>
-                <th>Стоимость / Оплата</th>
-                <th>Статус</th>
-                <th style={{ textAlign: 'right' }}>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredVouchers.length === 0 ? (
-                <tr>
-                  <td colSpan={9}>
-                    <EmptyState
-                      title="Путёвки не найдены"
-                      description={
-                        searchQuery
-                          ? 'По вашему поисковому запросу ничего не найдено.'
-                          : 'В данной категории пока нет оформленных путёвок.'
-                      }
-                      action={
-                        <Button variant="primary" size="sm" onClick={() => setIsVoucherModalOpen(true)}>
-                          Оформить путёвку
-                        </Button>
-                      }
-                    />
-                  </td>
-                </tr>
-              ) : (
-                filteredVouchers.map((v) => {
-                  const client = clientObj(v.clientId);
-                  const nights = calculateNights(v.checkIn, v.checkOut);
-                  const isPaid = (v.paid ?? 0) >= (v.totalPrice ?? 0) && (v.totalPrice ?? 0) > 0;
-                  return (
-                    <tr
-                      key={v.id}
-                      className={selectedVoucher?.id === v.id ? 'active-row' : ''}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => void openVoucherDetail(v)}
-                    >
-                      <td>
-                        <strong>#{v.id}</strong>
-                      </td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{clientName(v.clientId)}</div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          {client?.phone || client?.email || 'Контакты не указаны'}
-                        </div>
-                      </td>
-                      <td>
-                        <div>{categoryName(v.categoryId)}</div>
-                        {v.roomNumber ? (
-                          <span style={{ fontSize: '0.82rem', color: 'var(--accent)', fontWeight: 600 }}>
-                            Комната №{v.roomNumber}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Без комнаты</span>
-                        )}
-                      </td>
-                      <td>
-                        <div style={{ fontSize: '0.88rem' }}>
-                          {v.checkIn} — {v.checkOut}
-                        </div>
-                      </td>
-                      <td>{nights} ноч.</td>
-                      <td>{v.places ?? 1}</td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{money(v.totalPrice)}</div>
-                        <div
-                          style={{
-                            fontSize: '0.78rem',
-                            color: isPaid ? 'var(--ok)' : 'var(--amber)',
-                            fontWeight: 500,
-                          }}
-                        >
-                          Оплачено: {money(v.paid)}
-                        </div>
-                      </td>
-                      <td>
-                        <StatusBadge status={v.status} />
-                      </td>
-                      <td style={{ textAlign: 'right' }} className="actions" onClick={(e) => e.stopPropagation()}>
-                        <Button size="sm" variant="outline" onClick={() => void openVoucherDetail(v)}>
-                          Детали
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </TableWrap>
-      </Card>
-
-      {/* Modal: Voucher Detail View & Actions */}
-      <Modal
-        isOpen={selectedVoucher !== null}
-        onClose={() => setSelectedVoucher(null)}
-        title={selectedVoucher ? `Путёвка #${selectedVoucher.id}` : ''}
-        size="lg"
-      >
-        {selectedVoucher && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <StatusBadge status={selectedVoucher.status} />
-              <span style={{ fontSize: '0.86rem', color: 'var(--text-muted)' }}>
-                Срок оплаты: {formatDateTime(selectedVoucher.paymentDeadline)}
-              </span>
-            </div>
-
-            <div className="detail-grid">
-              <div className="detail-card-panel">
-                <h4>👤 Гость</h4>
-                <div style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: 4 }}>
-                  {clientName(selectedVoucher.clientId)}
-                </div>
-                {(() => {
-                  const c = clientObj(selectedVoucher.clientId);
-                  return (
-                    <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                      {c?.phone && <div>Телефон: <strong>{c.phone}</strong></div>}
-                      {c?.birthDate && <div>Дата рождения: <strong>{c.birthDate}</strong></div>}
-                      {c?.email && <div>Email: <strong>{c.email}</strong></div>}
-                    </div>
-                  );
-                })()}
-
-                {clientConditions.length > 0 && (
-                  <div style={{ marginTop: 12 }}>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 4 }}>
-                      Медицинские состояния:
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {clientConditions.map((cond) => (
-                        <span key={cond.conditionId} className="badge info" style={{ fontSize: '0.75rem' }}>
-                          {cond.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="detail-card-panel">
-                <h4>🛏️ Размещение</h4>
-                <dl style={{ margin: 0, fontSize: '0.9rem' }}>
-                  <dt>Категория:</dt>
-                  <dd>{categoryName(selectedVoucher.categoryId)}</dd>
-                  <dt>Номер:</dt>
-                  <dd>{selectedVoucher.roomNumber ? `Комната №${selectedVoucher.roomNumber}` : 'Не назначен'}</dd>
-                  <dt>Заезд:</dt>
-                  <dd>{selectedVoucher.checkIn ?? '—'}</dd>
-                  <dt>Выезд:</dt>
-                  <dd>{selectedVoucher.checkOut ?? '—'}</dd>
-                  <dt>Длительность:</dt>
-                  <dd>{calculateNights(selectedVoucher.checkIn, selectedVoucher.checkOut)} ночей</dd>
-                  <dt>Мест в заявке:</dt>
-                  <dd>{selectedVoucher.places ?? 1}</dd>
-                </dl>
-              </div>
-
-              <div className="detail-card-panel">
-                <h4>💳 Финансы</h4>
-                <dl style={{ margin: 0, fontSize: '0.9rem' }}>
-                  <dt>Общая сумма:</dt>
-                  <dd style={{ color: 'var(--accent)', fontWeight: 700, fontSize: '1.1rem' }}>
-                    {money(selectedVoucher.totalPrice)}
-                  </dd>
-                  <dt>Оплачено:</dt>
-                  <dd style={{ color: 'var(--ok)', fontWeight: 600 }}>{money(selectedVoucher.paid)}</dd>
-                  <dt>Остаток долга:</dt>
-                  <dd style={{ color: 'var(--danger)', fontWeight: 600 }}>
-                    {money(Math.max(0, (selectedVoucher.totalPrice ?? 0) - (selectedVoucher.paid ?? 0)))}
-                  </dd>
-                  <dt>Цена в сутки/место:</dt>
-                  <dd>{money(selectedVoucher.pricePerPlaceDay)}</dd>
-                </dl>
-              </div>
-            </div>
-
-            {/* Action Buttons Toolbar */}
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 10,
-                marginTop: 20,
-                paddingTop: 16,
-                borderTop: '1px solid var(--line)',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-              }}
-            >
-              {selectedVoucher.status === 'CONFIRMED' && (
-                <Button
-                  variant="primary"
-                  onClick={() => handleVoucherAction(booking.checkIn, 'Гость успешно заселён в номер!')}
-                >
-                  🏨 Заселить гостя
-                </Button>
-              )}
-
-              {selectedVoucher.status === 'CHECKED_IN' && (
-                <Button
-                  variant="primary"
-                  onClick={() => handleVoucherAction(booking.checkOut, 'Гость успешно выселен!')}
-                >
-                  🚪 Выселить гостя
-                </Button>
-              )}
-
-              {((selectedVoucher.paid ?? 0) < (selectedVoucher.totalPrice ?? 0) ||
-                selectedVoucher.status === 'AWAITING_PAYMENT') &&
-                selectedVoucher.status !== 'CANCELLED' &&
-                selectedVoucher.status !== 'COMPLETED' && (
-                  <Button
-                    variant="outline"
-                    onClick={() => handleVoucherAction(booking.pay, 'Оплата успешно зарегистрирована!')}
-                  >
-                    💳 Провести оплату
-                  </Button>
-                )}
-
-              {selectedVoucher.status !== 'COMPLETED' && selectedVoucher.status !== 'CANCELLED' && (
-                <Button variant="danger" onClick={handleCancelVoucher}>
-                  Аннулировать бронь
-                </Button>
-              )}
-
-              <Button variant="secondary" onClick={() => setSelectedVoucher(null)}>
-                Закрыть
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Modal: Create Voucher */}
-      <Modal
-        isOpen={isVoucherModalOpen}
-        onClose={() => setIsVoucherModalOpen(false)}
-        title="Оформление новой путёвки"
-        size="md"
-      >
-        <form onSubmit={handleCreateVoucher}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-              Выберите существующего гостя или создайте нового
-            </span>
-            <Button
-              type="button"
-              variant="link"
-              size="sm"
-              onClick={() => {
-                setIsVoucherModalOpen(false);
-                setIsClientModalOpen(true);
-              }}
-            >
-              + Создать гостя
-            </Button>
-          </div>
-
-          <Field label="Гость (Клиент)" required error={!clientId ? 'Необходимо выбрать клиента' : undefined}>
-            <select value={clientId} onChange={(e) => setClientId(e.target.value)} required>
-              <option value="">— Выберите гостя из базы —</option>
-              {clientList.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.lastName} {c.firstName} {c.middleName ?? ''} ({c.phone || c.birthDate || `#${c.id}`})
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <Field
-            label="Категория номера"
-            required
-            hint={chosenCategory ? `Максимум ${chosenCategory.capacityTotal} мест в номере` : undefined}
-          >
-            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required>
-              <option value="">— Выберите категорию номера —</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} (до {c.capacityTotal} чел.)
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="Дата заезда" required>
-              <input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} required />
-            </Field>
-            <Field
-              label="Дата выезда"
-              required
-              error={checkOut <= checkIn ? 'Дата выезда должна быть позже даты заезда' : undefined}
-            >
-              <input type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} required />
-            </Field>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field
-              label="Количество мест"
-              required
-              error={capacityExceeded ? `Превышена вместимость категории (${chosenCategory?.capacityTotal})` : undefined}
-            >
-              <input
-                type="number"
-                min={1}
-                max={chosenCategory ? chosenCategory.capacityTotal : 10}
-                value={places}
-                onChange={(e) => setPlaces(Number(e.target.value))}
-                required
-              />
-            </Field>
-
-            <Field label="Канал продаж" required>
-              <select value={channelId} onChange={(e) => setChannelId(e.target.value)} required>
-                {channels.map((ch) => (
-                  <option key={ch.id} value={ch.id}>
-                    {ch.name} ({ch.commissionPct}%)
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="Лечебный профиль" required>
-              <select value={profileId} onChange={(e) => setProfileId(e.target.value)} required>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="План питания (Диета)">
-              <select value={dietId} onChange={(e) => setDietId(e.target.value)}>
-                <option value="">— По умолчанию (Обычный стол) —</option>
-                {diets.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} ({d.code})
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-
-          {customers.length > 0 && (
-            <Field label="Корпоративный заказчик (B2B)">
-              <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-                <option value="">— Индивидуальный клиент —</option>
-                {customers.map((cust) => (
-                  <option key={cust.id} value={cust.id}>
-                    {cust.name} {cust.contractNo ? `(дог. ${cust.contractNo})` : ''}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 10,
-              marginTop: 20,
-              paddingTop: 16,
-              borderTop: '1px solid var(--line)',
-            }}
-          >
-            <Button type="button" variant="secondary" onClick={() => setIsVoucherModalOpen(false)}>
-              Отмена
-            </Button>
-            <Button type="submit" variant="primary" disabled={!isVoucherFormValid}>
+          }
+          emptyTitle="Путёвки не найдены"
+          emptyDescription={statusFilter ? 'В данной категории пока нет оформленных путёвок.' : 'Пока не оформлено ни одной путёвки.'}
+          emptyAction={
+            <Button variant="primary" size="sm" icon={<Icon name="plus" size={16} />} onClick={() => setIsVoucherModalOpen(true)}>
               Оформить путёвку
             </Button>
-          </div>
-        </form>
-      </Modal>
+          }
+        />
+      </Card>
 
-      {/* Modal: Create Client */}
-      <Modal
+      <VoucherDetailModal
+        voucher={selectedVoucher}
+        client={selectedVoucher ? clientObj(selectedVoucher.clientId) : undefined}
+        categoryName={categoryName}
+        conditions={clientConditions}
+        busy={busy === 'checkIn' || busy === 'checkOut' || busy === 'pay' || busy === 'cancel' ? busy : null}
+        error={error}
+        onAction={(a) => void handleVoucherAction(a)}
+        onClose={() => { setSelectedVoucher(null); setError(null); }}
+      />
+
+      <CreateVoucherModal
+        isOpen={isVoucherModalOpen}
+        onClose={() => setIsVoucherModalOpen(false)}
+        form={voucherForm}
+        onChange={(patch) => setVoucherForm((f) => ({ ...f, ...patch }))}
+        onSubmit={handleCreateVoucher}
+        onCreateClient={() => {
+          setIsVoucherModalOpen(false);
+          setIsClientModalOpen(true);
+        }}
+        clientList={clientList}
+        categories={categories}
+        profiles={profiles}
+        diets={diets}
+        channels={channels}
+        customers={customers}
+        busy={busy === 'createVoucher'}
+        error={error}
+      />
+
+      <NewClientModal
         isOpen={isClientModalOpen}
         onClose={() => setIsClientModalOpen(false)}
-        title="Новая карточка гостя"
-        size="md"
-      >
-        <form onSubmit={handleCreateClient}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="Фамилия" required>
-              <input
-                value={newClient.lastName}
-                required
-                placeholder="Иванов"
-                onChange={(e) => setNewClient({ ...newClient, lastName: e.target.value })}
-              />
-            </Field>
-            <Field label="Имя" required>
-              <input
-                value={newClient.firstName}
-                required
-                placeholder="Иван"
-                onChange={(e) => setNewClient({ ...newClient, firstName: e.target.value })}
-              />
-            </Field>
-          </div>
+        value={newClient}
+        onChange={setNewClient}
+        onSubmit={handleCreateClient}
+        busy={busy === 'createClient'}
+        error={error}
+      />
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="Отчество">
-              <input
-                value={newClient.middleName ?? ''}
-                placeholder="Иванович"
-                onChange={(e) => setNewClient({ ...newClient, middleName: e.target.value })}
-              />
-            </Field>
-            <Field label="Дата рождения" required>
-              <input
-                type="date"
-                value={newClient.birthDate}
-                required
-                onChange={(e) => setNewClient({ ...newClient, birthDate: e.target.value })}
-              />
-            </Field>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="Номер телефона">
-              <input
-                type="tel"
-                value={newClient.phone ?? ''}
-                placeholder="+375 29 123-45-67"
-                onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
-              />
-            </Field>
-            <Field label="Email">
-              <input
-                type="email"
-                value={newClient.email ?? ''}
-                placeholder="guest@example.com"
-                onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
-              />
-            </Field>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 10,
-              marginTop: 20,
-              paddingTop: 16,
-              borderTop: '1px solid var(--line)',
-            }}
-          >
-            <Button type="button" variant="secondary" onClick={() => setIsClientModalOpen(false)}>
-              Отмена
-            </Button>
-            <Button type="submit" variant="primary">
-              Создать гостя
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Modal: Waitlist Entries */}
-      <Modal
+      <WaitlistModal
         isOpen={isWaitlistModalOpen}
         onClose={() => setIsWaitlistModalOpen(false)}
-        title="Лист ожидания (Waitlist)"
-        size="lg"
-      >
-        <div>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 14 }}>
-            Гости, ожидающие освобождения мест в выбранных категориях на желаемые даты.
-          </p>
+        queue={queue}
+        clientName={clientName}
+        categoryName={categoryName}
+        onRemove={(e) => void handleRemoveFromWaitlist(e)}
+        busyId={busy?.startsWith('wl-') ? Number(busy.slice(3)) : null}
+        error={error}
+      />
 
-          <TableWrap>
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Гость</th>
-                  <th>Желаемая категория</th>
-                  <th>Период</th>
-                  <th>Мест</th>
-                  <th>Дата заявки</th>
-                  <th style={{ textAlign: 'right' }}>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {queue.length === 0 ? (
-                  <tr>
-                    <td colSpan={7}>
-                      <EmptyState
-                        title="Лист ожидания пуст"
-                        description="Нет гостей, ожидающих появления свободных мест."
-                      />
-                    </td>
-                  </tr>
-                ) : (
-                  queue.map((entry) => (
-                    <tr key={entry.id}>
-                      <td>#{entry.id}</td>
-                      <td>
-                        <strong>{clientName(entry.clientId)}</strong>
-                      </td>
-                      <td>{categoryName(entry.categoryId)}</td>
-                      <td>
-                        {entry.dateFrom} — {entry.dateTo}
-                      </td>
-                      <td>{entry.places}</td>
-                      <td>{formatDateTime(entry.createdAt)}</td>
-                      <td style={{ textAlign: 'right' }} className="actions">
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => handleRemoveFromWaitlist(entry.id)}
-                        >
-                          Исключить
-                        </Button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </TableWrap>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-            <Button variant="secondary" onClick={() => setIsWaitlistModalOpen(false)}>
-              Закрыть
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      {confirmDialog}
     </section>
   );
 }

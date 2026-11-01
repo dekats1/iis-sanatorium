@@ -1,0 +1,76 @@
+/* Стили раздела: bookings (AdminBookingsPage, MyBookingsPage, components/bookings/*) */
+
+.bk-page { min-width: 0; }
+.bk-page > .notice,
+.bk-page > .error { margin-bottom: var(--space-4); }
+.bk-page .card > .tabs { margin-bottom: var(--space-3); }
+.bk-page .card > .data-table:last-child { margin-bottom: 0; }
+
+/* Ячейки таблиц */
+.bk-room { font-size: 0.8125rem; font-weight: 600; color: var(--accent); }
+.bk-paid { font-size: 0.8125rem; font-weight: 600; }
+.bk-paid.is-ok { color: var(--ok); }
+.bk-paid.is-due { color: var(--warning); }
+.bk-deadline { font-size: 0.875rem; font-weight: 600; color: var(--warning); white-space: nowrap; }
+.bk-row-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-2); }
+td.actions .bk-row-actions button + button { margin-left: 0; }
+
+/* Карточка путёвки */
+.bk-detail-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.bk-inline-icon { display: inline-flex; align-items: center; gap: 6px; }
+.bk-panel-title { display: flex; align-items: center; gap: var(--space-2); font-family: var(--font-head); color: var(--text-darker); }
+.bk-panel-title svg { color: var(--accent); }
+.bk-guest-name { font-weight: 700; font-size: 1.0625rem; color: var(--text-darker); margin-bottom: var(--space-2); }
+.bk-total { color: var(--accent); font-weight: 700; font-size: 1.125rem; font-variant-numeric: tabular-nums; }
+.bk-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); width: 100%; }
+
+/* Формы в модалках */
+.bk-form-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+
+/* Расчёт возврата */
+.bk-summary {
+  grid-template-columns: 1fr auto;
+  margin: 0;
+  padding: var(--space-4);
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.bk-summary dd { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.bk-summary-total { padding-top: var(--space-3); border-top: 1px dashed var(--line-strong); font-weight: 700; color: var(--text-darker); }
+.bk-summary-refund { color: var(--ok); font-size: 1.25rem; }
+
+/* Электронный ваучер */
+.bk-memo {
+  background: var(--surface);
+  color: var(--text);
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+}
+.bk-memo-head {
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: var(--space-3);
+  padding-bottom: var(--space-3); margin-bottom: var(--space-4); border-bottom: 2px solid var(--line);
+}
+.bk-memo-title { margin: 0 0 4px; font-family: var(--font-head); color: var(--accent); font-size: 1.25rem; }
+.bk-memo-stamp { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.bk-memo-note {
+  margin-top: var(--space-4); padding: var(--space-3);
+  background: var(--bg-subtle); border-radius: var(--radius-md);
+  font-size: 0.875rem; line-height: 1.5;
+}
+.bk-memo-note ul { margin: 4px 0 0; padding-left: 18px; }
+
+@media (max-width: 520px) {
+  .bk-actions > .btn { flex: 1 1 100%; }
+  .bk-memo { padding: var(--space-4); }
+  .bk-memo-stamp { align-items: flex-start; }
+  .bk-summary { grid-template-columns: 1fr; }
+  .bk-summary dd { text-align: left; }
+}
+
+@media print {
+  .bk-memo { border-color: currentColor; }
+}
+.bk-cell-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.bk-cell-stack.bk-cell-right { align-items: flex-end; }

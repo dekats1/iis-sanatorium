@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { booking, refunds, reviews, waitlist } from '../api/endpoints';
 import LeaveReviewModal from '../components/LeaveReviewModal';
@@ -8,23 +8,38 @@ import {
   Card,
   EmptyState,
   ErrorBox,
-  Field,
   formatDateTime,
-  Modal,
   money,
+  Notice,
+  SkeletonRows,
   StatCard,
   StatusBadge,
-  TableWrap,
+  Tabs,
   today,
+  useConfirm,
+  useToast,
 } from '../components/ui';
+import { DataTable, type Column } from '../components/DataTable';
+import { Icon } from '../components/icons';
+import RefundModal from '../components/bookings/RefundModal';
+import VoucherMemoModal from '../components/bookings/VoucherMemoModal';
+import { calculateDaysLeft, period } from '../components/bookings/bookingUtils';
 import type { RefundCalculation, VoucherView, WaitlistEntry } from '../types';
 
+type TabId = 'upcoming' | 'archive' | 'waitlist';
+
+const UPCOMING = ['AWAITING_PAYMENT', 'CONFIRMED', 'CHECKED_IN'];
+const ARCHIVE = ['COMPLETED', 'CANCELLED', 'EXPIRED'];
+
 export default function MyBookingsPage() {
+  const toast = useToast();
+  const [ask, confirmDialog] = useConfirm();
   const [vouchers, setVouchers] = useState<VoucherView[]>([]);
   const [entries, setEntries] = useState<WaitlistEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<'upcoming' | 'archive' | 'waitlist'>('upcoming');
+  const [activeTab, setActiveTab] = useState<TabId>('upcoming');
   const [error, setError] = useState<unknown>(null);
-  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [payingId, setPayingId] = useState<number | null>(null);
 
   // Modals state
   const [selectedVoucherForMemo, setSelectedVoucherForMemo] = useState<VoucherView | null>(null);
@@ -44,16 +59,14 @@ export default function MyBookingsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [v, w, allReviews] = await Promise.all([
-        booking.my(),
-        waitlist.my(),
-        reviews.list(),
-      ]);
+      const [v, w, allReviews] = await Promise.all([booking.my(), waitlist.my(), reviews.list()]);
       setVouchers(v);
       setEntries(w);
       setReviewedVoucherIds(new Set(allReviews.map((r) => r.voucherId)));
     } catch (err) {
       setError(err);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -63,21 +76,19 @@ export default function MyBookingsPage() {
 
   async function pay(v: VoucherView) {
     setError(null);
+    setPayingId(v.id);
     try {
       const p = await booking.pay(v.id);
       window.location.assign(p.payUrl);
     } catch (err) {
       setError(err);
+      setPayingId(null);
     }
   }
 
   const openRefundModal = (v: VoucherView) => {
-    const calc = refunds.calculate(
-      v.checkIn ?? today(1),
-      v.totalPrice ?? 0,
-      v.paid ?? 0,
-      v.id
-    );
+    const calc = refunds.calculate(v.checkIn ?? today(1), v.totalPrice ?? 0, v.paid ?? 0, v.id);
+    setError(null);
     setSelectedVoucherForRefund(v);
     setRefundCalc(calc);
     setRefundReason('Изменение планов');
@@ -89,19 +100,14 @@ export default function MyBookingsPage() {
     setRefundSubmitting(true);
     setError(null);
     try {
-      // Call booking.cancel endpoint
       await booking.cancel(selectedVoucherForRefund.id);
-      // Process notification & audit
       await refunds.processRefund({
         voucherId: selectedVoucherForRefund.id,
         reason: refundReason,
         comments: refundComment,
       });
-
-      setMessage(
-        `Путёвка #${selectedVoucherForRefund.id} отменена. К возврату на карту: ${money(
-          refundCalc.refundAmount
-        )} (удержано ${refundCalc.retainPercent}%: ${money(refundCalc.retainedAmount)}).`
+      toast.success(
+        `Путёвка #${selectedVoucherForRefund.id} отменена. К возврату на карту: ${money(refundCalc.refundAmount)} (удержано ${refundCalc.retainPercent}%: ${money(refundCalc.retainedAmount)}).`,
       );
       setSelectedVoucherForRefund(null);
       await load();
@@ -113,578 +119,281 @@ export default function MyBookingsPage() {
   }
 
   async function cancelWaitlist(id: number) {
-    if (!window.confirm('Исключить заявку из листа ожидания?')) return;
+    if (!(await ask({ title: 'Лист ожидания', message: 'Исключить заявку из листа ожидания?', confirmLabel: 'Исключить', danger: true }))) return;
     try {
       await waitlist.remove(id);
-      setMessage('Заявка исключена из листа ожидания.');
+      toast.success('Заявка исключена из листа ожидания.');
       await load();
     } catch (err) {
       setError(err);
     }
   }
 
-  const calculateDaysLeft = (checkInStr: string | null) => {
-    if (!checkInStr) return null;
-    const diff = new Date(checkInStr).getTime() - new Date().getTime();
-    return Math.ceil(diff / (1000 * 3600 * 24));
+  const upcomingVouchers = useMemo(() => vouchers.filter((v) => UPCOMING.includes(v.status)), [vouchers]);
+  const archiveVouchers = useMemo(() => vouchers.filter((v) => ARCHIVE.includes(v.status)), [vouchers]);
+
+  const priceCell = (v: VoucherView) => {
+    const cur = v.currency ?? 'BYN';
+    const fullyPaid = (v.paid ?? 0) >= (v.totalPrice ?? 0);
+    return (
+      <>
+        <div className="u-semibold">{money(v.totalPrice, cur)}</div>
+        <div className={`bk-paid ${fullyPaid ? 'is-ok' : 'is-due'}`}>Оплачено: {money(v.paid, cur)}</div>
+      </>
+    );
   };
 
-  const upcomingVouchers = vouchers.filter((v) =>
-    ['AWAITING_PAYMENT', 'CONFIRMED', 'CHECKED_IN'].includes(v.status)
+  const upcomingColumns: Column<VoucherView>[] = [
+    { key: 'id', header: '№ Путёвки', render: (v) => <strong>#{v.id}</strong>, sortValue: (v) => v.id },
+    { key: 'status', header: 'Статус', render: (v) => <StatusBadge status={v.status} />, sortValue: (v) => v.status },
+    {
+      key: 'dates',
+      header: 'Заезд и номер',
+      sortValue: (v) => v.checkIn,
+      render: (v) => {
+        const daysLeft = calculateDaysLeft(v.checkIn);
+        return (
+          <div className="bk-cell-stack">
+            <span className="u-semibold">{period(v.checkIn, v.checkOut)}</span>
+            <span className="u-muted-sm">{v.roomNumber ? `Комната № ${v.roomNumber}` : 'Номер назначат при заезде'}</span>
+            {v.status === 'CHECKED_IN' ? (
+              <Badge variant="good" icon="key">Вы проживаете</Badge>
+            ) : daysLeft !== null && daysLeft > 0 ? (
+              <Badge variant={daysLeft <= 3 ? 'wait' : 'info'} icon="calendar">Через {daysLeft} дн.</Badge>
+            ) : daysLeft === 0 ? (
+              <Badge variant="good" icon="checkCircle">Заезд сегодня</Badge>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'price',
+      header: 'Стоимость / Оплата',
+      align: 'right',
+      sortValue: (v) => v.totalPrice ?? 0,
+      render: (v) => (
+        <div className="bk-cell-stack bk-cell-right">
+          {priceCell(v)}
+          {v.status === 'AWAITING_PAYMENT' && <span className="bk-deadline">оплатить до {formatDateTime(v.paymentDeadline)}</span>}
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Действия',
+      hideHeader: true,
+      className: 'actions',
+      render: (v) => (
+        <div className="bk-row-actions">
+          {v.status === 'AWAITING_PAYMENT' && (
+            <Button variant="primary" size="sm" icon={<Icon name="creditCard" size={16} />} loading={payingId === v.id} onClick={() => void pay(v)}>
+              Оплатить
+            </Button>
+          )}
+          <Button variant="outline" size="sm" icon={<Icon name="file" size={16} />} onClick={() => setSelectedVoucherForMemo(v)}>
+            Ваучер
+          </Button>
+          {['AWAITING_PAYMENT', 'CONFIRMED'].includes(v.status) && (
+            <Button variant="danger" size="sm" onClick={() => openRefundModal(v)}>
+              Отменить / Возврат
+            </Button>
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  const archiveColumns: Column<VoucherView>[] = [
+    { key: 'id', header: '№ Путёвки', render: (v) => <strong>#{v.id}</strong>, sortValue: (v) => v.id },
+    { key: 'status', header: 'Статус', render: (v) => <StatusBadge status={v.status} />, sortValue: (v) => v.status },
+    { key: 'dates', header: 'Период отдыха', render: (v) => period(v.checkIn, v.checkOut), sortValue: (v) => v.checkIn },
+    { key: 'room', header: 'Номер', render: (v) => (v.roomNumber ? `№ ${v.roomNumber}` : '—') },
+    { key: 'total', header: 'Сумма путёвки', align: 'right', render: (v) => money(v.totalPrice, v.currency ?? 'BYN'), sortValue: (v) => v.totalPrice ?? 0 },
+    { key: 'paid', header: 'Оплачено', align: 'right', render: (v) => money(v.paid, v.currency ?? 'BYN'), sortValue: (v) => v.paid ?? 0 },
+    {
+      key: 'actions',
+      header: 'Ваучер',
+      hideHeader: true,
+      className: 'actions',
+      render: (v) => (
+        <div className="bk-row-actions">
+          {v.status === 'COMPLETED' &&
+            (reviewedVoucherIds.has(v.id) ? (
+              <Badge variant="good" icon="check">Отзыв оставлен</Badge>
+            ) : (
+              <Button variant="outline" size="sm" icon={<Icon name="star" size={16} />} onClick={() => setReviewVoucher(v)}>
+                Оценить отдых (+50 б.)
+              </Button>
+            ))}
+          <Button variant="secondary" size="sm" icon={<Icon name="file" size={16} />} onClick={() => setSelectedVoucherForMemo(v)}>
+            Квитанция
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  const waitlistColumns: Column<WaitlistEntry>[] = [
+    { key: 'id', header: 'ID заявки', render: (w) => `#${w.id}`, sortValue: (w) => w.id },
+    { key: 'category', header: 'Категория номера', render: (w) => <strong>Категория #{w.categoryId}</strong>, sortValue: (w) => w.categoryId },
+    { key: 'period', header: 'Желаемый период', render: (w) => period(w.dateFrom, w.dateTo), sortValue: (w) => w.dateFrom },
+    { key: 'places', header: 'Мест', align: 'right', render: (w) => w.places },
+    { key: 'status', header: 'Статус', render: (w) => <StatusBadge status={w.status} /> },
+    { key: 'created', header: 'Дата подачи', render: (w) => formatDateTime(w.createdAt), sortValue: (w) => w.createdAt },
+    {
+      key: 'actions',
+      header: 'Действия',
+      hideHeader: true,
+      className: 'actions',
+      render: (w) => (
+        <Button variant="danger" size="sm" icon={<Icon name="trash" size={16} />} onClick={() => void cancelWaitlist(w.id)}>
+          Отозвать заявку
+        </Button>
+      ),
+    },
+  ];
+
+  const searchLink = (label: string) => (
+    <Link to="/search" className="btn primary">
+      <Icon name="search" size={18} /> {label}
+    </Link>
   );
 
-  const archiveVouchers = vouchers.filter((v) =>
-    ['COMPLETED', 'CANCELLED', 'EXPIRED'].includes(v.status)
-  );
+  const modalOpen = selectedVoucherForRefund !== null;
 
   return (
-    <section>
-      {/* Page Header */}
+    <section className="bk-page">
       <div className="page-head">
         <div>
           <h1>Личный кабинет гостя • Мои путёвки</h1>
-          <p className="card-subtitle">
-            Управление активными бронированиями, электронные ваучеры, платежи и оформление возвратов
-          </p>
+          <p className="page-subtitle">Управление активными бронированиями, электронные ваучеры, платежи и оформление возвратов</p>
         </div>
-        <Link to="/search">
-          <Button variant="primary">+ Забронировать номер</Button>
-        </Link>
+        <div className="page-actions">
+          <Link to="/search" className="btn primary">
+            <Icon name="plus" size={18} /> Забронировать номер
+          </Link>
+        </div>
       </div>
 
       {payResult === 'SUCCESS' && (
-        <div className="ok" role="alert">
-          ✓ Оплата успешно зачислена! Ваша путёвка подтверждена, номер закреплён.
-        </div>
+        <Notice tone="success">Оплата успешно зачислена! Ваша путёвка подтверждена, номер закреплён.</Notice>
       )}
       {payResult === 'DECLINED' && (
-        <div className="warning" role="alert">
-          Платёж был отклонён. Пока не истёк срок оплаты, вы можете повторить платёж позже.
-        </div>
+        <Notice tone="warning">Платёж был отклонён. Пока не истёк срок оплаты, вы можете повторить платёж позже.</Notice>
       )}
 
-      <ErrorBox error={error} />
-      {message && <p className="ok">{message}</p>}
+      {!modalOpen && <ErrorBox error={error} />}
 
-      {/* KPI Stats Grid */}
       <div className="kpi-grid">
-        <StatCard
-          label="Предстоящих поездок"
-          value={upcomingVouchers.length}
-          subvalue="Активные брони"
-          color="c-teal"
-        />
+        <StatCard label="Предстоящих поездок" value={loading ? '—' : upcomingVouchers.length} subvalue="Активные брони" color="c-teal" icon={<Icon name="ticket" size={20} />} />
         <StatCard
           label="Завершённых заездов"
-          value={archiveVouchers.filter((v) => v.status === 'COMPLETED').length}
+          value={loading ? '—' : archiveVouchers.filter((v) => v.status === 'COMPLETED').length}
           subvalue="История оздоровления"
           color="c-blue"
+          icon={<Icon name="leaf" size={20} />}
         />
-        <StatCard
-          label="Заявок в листе ожидания"
-          value={entries.length}
-          subvalue="Ожидают освобождения мест"
-          color="c-amber"
-        />
+        <StatCard label="Заявок в листе ожидания" value={loading ? '—' : entries.length} subvalue="Ожидают освобождения мест" color="c-amber" icon={<Icon name="clock" size={20} />} />
       </div>
 
-      {/* Tabs */}
-      <div className="tabs">
-        <button
-          type="button"
-          className={`tab ${activeTab === 'upcoming' ? 'active' : ''}`}
-          onClick={() => setActiveTab('upcoming')}
-        >
-          Предстоящие и активные ({upcomingVouchers.length})
-        </button>
-        <button
-          type="button"
-          className={`tab ${activeTab === 'archive' ? 'active' : ''}`}
-          onClick={() => setActiveTab('archive')}
-        >
-          Архив поездок ({archiveVouchers.length})
-        </button>
-        <button
-          type="button"
-          className={`tab ${activeTab === 'waitlist' ? 'active' : ''}`}
-          onClick={() => setActiveTab('waitlist')}
-        >
-          Лист ожидания ({entries.length})
-        </button>
-      </div>
+      <Tabs<TabId>
+        label="Разделы личного кабинета"
+        value={activeTab}
+        onChange={setActiveTab}
+        tabs={[
+          { id: 'upcoming', label: 'Предстоящие и активные', icon: 'calendar', count: upcomingVouchers.length },
+          { id: 'archive', label: 'Архив поездок', icon: 'inbox', count: archiveVouchers.length },
+          { id: 'waitlist', label: 'Лист ожидания', icon: 'clock', count: entries.length },
+        ]}
+      />
 
-      {/* TAB 1: Upcoming and Active Vouchers */}
-      {activeTab === 'upcoming' && (
-        <Card title="Предстоящие и текущие заезды">
-          {upcomingVouchers.length === 0 ? (
-            <EmptyState
-              title="У вас пока нет активных бронирований"
-              description="Выберите подходящую категорию номера и даты заезда на странице поиска."
-              action={
-                <Link to="/search">
-                  <Button variant="primary">Подобрать путёвку</Button>
-                </Link>
-              }
-            />
-          ) : (
-            <TableWrap>
-              <table>
-                <thead>
-                  <tr>
-                    <th>№ Путёвки</th>
-                    <th>Статус</th>
-                    <th>Номер комнаты</th>
-                    <th>Даты заезда</th>
-                    <th>Осталось дней</th>
-                    <th>Стоимость / Оплачено</th>
-                    <th>Срок оплаты</th>
-                    <th style={{ textAlign: 'right' }}>Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {upcomingVouchers.map((v) => {
-                    const daysLeft = calculateDaysLeft(v.checkIn);
-                    const isFullyPaid = (v.paid ?? 0) >= (v.totalPrice ?? 0);
-                    return (
-                      <tr key={v.id}>
-                        <td>
-                          <strong>#{v.id}</strong>
-                        </td>
-                        <td>
-                          <StatusBadge status={v.status} />
-                        </td>
-                        <td>
-                          {v.roomNumber ? (
-                            <strong style={{ color: 'var(--accent)' }}>№ {v.roomNumber}</strong>
-                          ) : (
-                            <span style={{ color: 'var(--text-subtle)' }}>Назначат при заезде</span>
-                          )}
-                        </td>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>
-                            {v.checkIn} — {v.checkOut}
-                          </div>
-                        </td>
-                        <td>
-                          {v.status === 'CHECKED_IN' ? (
-                            <Badge variant="good">🏨 Вы проживаете</Badge>
-                          ) : daysLeft !== null ? (
-                            daysLeft > 0 ? (
-                              <Badge variant={daysLeft <= 3 ? 'wait' : 'info'}>
-                                Через {daysLeft} дн.
-                              </Badge>
-                            ) : (
-                              <Badge variant="good">Заезд сегодня</Badge>
-                            )
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td>
-                          <div style={{ fontWeight: 700 }}>{money(v.totalPrice, v.currency ?? 'BYN')}</div>
-                          <div
-                            style={{
-                              fontSize: '0.8rem',
-                              color: isFullyPaid ? 'var(--ok)' : 'var(--amber)',
-                              fontWeight: 600,
-                            }}
-                          >
-                            Оплачено: {money(v.paid, v.currency ?? 'BYN')}
-                          </div>
-                        </td>
-                        <td>
-                          {v.status === 'AWAITING_PAYMENT' ? (
-                            <span style={{ color: 'var(--amber)', fontWeight: 600, fontSize: '0.85rem' }}>
-                              до {formatDateTime(v.paymentDeadline)}
-                            </span>
-                          ) : (
-                            <span style={{ color: 'var(--ok)', fontSize: '0.85rem' }}>Подтверждено</span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'right' }} className="actions">
-                          <div style={{ display: 'inline-flex', gap: 6 }}>
-                            {v.status === 'AWAITING_PAYMENT' && (
-                              <Button variant="primary" size="sm" onClick={() => void pay(v)}>
-                                Оплатить
-                              </Button>
-                            )}
-
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setSelectedVoucherForMemo(v)}
-                            >
-                              📄 Ваучер
-                            </Button>
-
-                            {['AWAITING_PAYMENT', 'CONFIRMED'].includes(v.status) && (
-                              <Button
-                                variant="danger"
-                                size="sm"
-                                onClick={() => openRefundModal(v)}
-                              >
-                                Отменить / Возврат
-                              </Button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </TableWrap>
-          )}
+      {loading ? (
+        <Card>
+          <SkeletonRows rows={4} />
         </Card>
-      )}
-
-      {/* TAB 2: Archive & History */}
-      {activeTab === 'archive' && (
-        <Card title="Архив поездок и завершённые путёвки">
-          {archiveVouchers.length === 0 ? (
-            <EmptyState title="В архиве пока нет завершённых поездок" />
-          ) : (
-            <TableWrap>
-              <table>
-                <thead>
-                  <tr>
-                    <th>№ Путёвки</th>
-                    <th>Статус</th>
-                    <th>Период отдыха</th>
-                    <th>Номер</th>
-                    <th>Сумма путёвки</th>
-                    <th>Оплачено</th>
-                    <th style={{ textAlign: 'right' }}>Ваучер</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {archiveVouchers.map((v) => (
-                    <tr key={v.id}>
-                      <td>
-                        <strong>#{v.id}</strong>
-                      </td>
-                      <td>
-                        <StatusBadge status={v.status} />
-                      </td>
-                      <td>
-                        {v.checkIn} — {v.checkOut}
-                      </td>
-                      <td>{v.roomNumber ? `№ ${v.roomNumber}` : '—'}</td>
-                      <td>{money(v.totalPrice, v.currency ?? 'BYN')}</td>
-                      <td>{money(v.paid, v.currency ?? 'BYN')}</td>
-                      <td style={{ textAlign: 'right' }} className="actions">
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                          {v.status === 'COMPLETED' && (
-                            reviewedVoucherIds.has(v.id) ? (
-                              <Badge variant="good">✓ Отзыв оставлен</Badge>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setReviewVoucher(v)}
-                                style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
-                              >
-                                ★ Оценить отдых (+50 б.)
-                              </Button>
-                            )
-                          )}
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setSelectedVoucherForMemo(v)}
-                          >
-                            Квитанция
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
+      ) : (
+        <>
+          {activeTab === 'upcoming' && (
+            <Card>
+              {upcomingVouchers.length === 0 ? (
+                <EmptyState
+                  title="У вас пока нет активных бронирований"
+                  description="Выберите подходящую категорию номера и даты заезда на странице поиска."
+                  action={searchLink('Подобрать путёвку')}
+                />
+              ) : (
+                <DataTable
+                  rows={upcomingVouchers}
+                  columns={upcomingColumns}
+                  rowKey={(v) => v.id}
+                  caption="Путёвки клиента: предстоящие и текущие заезды"
+                  initialSort={{ key: 'dates', dir: 'asc' }}
+                />
+              )}
+            </Card>
           )}
-        </Card>
-      )}
 
-      {/* TAB 3: Waitlist */}
-      {activeTab === 'waitlist' && (
-        <Card title="Заявки в листе ожидания" subtitle="Отслеживание свободных мест в санатории">
-          {entries.length === 0 ? (
-            <EmptyState
-              title="Лист ожидания пуст"
-              description="Если нужный номер занят, вы можете подать заявку в лист ожидания со страницы поиска."
-            />
-          ) : (
-            <TableWrap>
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID заявки</th>
-                    <th>Категория номера</th>
-                    <th>Желаемый период</th>
-                    <th>Мест</th>
-                    <th>Статус</th>
-                    <th>Дата подачи</th>
-                    <th style={{ textAlign: 'right' }}>Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((w) => (
-                    <tr key={w.id}>
-                      <td>#{w.id}</td>
-                      <td>
-                        <strong>Категория #{w.categoryId}</strong>
-                      </td>
-                      <td>
-                        {w.dateFrom} — {w.dateTo}
-                      </td>
-                      <td>{w.places}</td>
-                      <td>
-                        <StatusBadge status={w.status} />
-                      </td>
-                      <td>{formatDateTime(w.createdAt)}</td>
-                      <td style={{ textAlign: 'right' }} className="actions">
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => void cancelWaitlist(w.id)}
-                        >
-                          Отозвать заявку
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
-          )}
-        </Card>
-      )}
-
-      {/* Modal: Interactive Refund & Cancellation (Идея 11 & ФТ-09) */}
-      <Modal
-        isOpen={selectedVoucherForRefund !== null}
-        onClose={() => setSelectedVoucherForRefund(null)}
-        title={
-          selectedVoucherForRefund
-            ? `Оформление возврата по путёвке #${selectedVoucherForRefund.id}`
-            : ''
-        }
-        size="md"
-      >
-        {selectedVoucherForRefund && refundCalc && (
-          <div>
-            <div
-              style={{
-                background: 'var(--amber-soft)',
-                padding: '12px 16px',
-                borderRadius: 'var(--radius-md)',
-                marginBottom: 16,
-                fontSize: '0.88rem',
-                color: '#7A4B06',
-                lineHeight: 1.5,
-              }}
-            >
-              ℹ️ <strong>Правила отмены и возврата (ФТ-09):</strong>
-              <div style={{ marginTop: 4 }}>{refundCalc.policyDescription}</div>
-            </div>
-
-            {/* Refund calculation breakdown */}
-            <div className="refund-summary-box">
-              <div className="refund-summary-row">
-                <span>Общая стоимость путёвки:</span>
-                <strong>{money(refundCalc.totalPrice)}</strong>
-              </div>
-              <div className="refund-summary-row">
-                <span>Фактически оплачено гостем:</span>
-                <strong>{money(refundCalc.paidAmount)}</strong>
-              </div>
-              <div className="refund-summary-row">
-                <span>До заезда осталось:</span>
-                <span>
-                  <strong>{refundCalc.daysBeforeCheckIn} суток</strong>
-                </span>
-              </div>
-              <div className="refund-summary-row" style={{ color: 'var(--danger)' }}>
-                <span>Удержание по правилам отмены ({refundCalc.retainPercent}%):</span>
-                <span>-{money(refundCalc.retainedAmount)}</span>
-              </div>
-              <div className="refund-summary-row" style={{ color: 'var(--ok)' }}>
-                <span>Сумма к возврату на карту:</span>
-                <span style={{ fontSize: '1.25rem' }}>{money(refundCalc.refundAmount)}</span>
-              </div>
-            </div>
-
-            {/* Reason selector */}
-            <Field label="Причина отмены бронирования" required>
-              <select
-                value={refundReason}
-                onChange={(e) => setRefundReason(e.target.value)}
-              >
-                <option value="Изменение планов">Изменение личных планов</option>
-                <option value="Состояние здоровья">Состояние здоровья / болезнь</option>
-                <option value="Семейные обстоятельства">Семейные обстоятельства</option>
-                <option value="Перенос поездки на другой сезон">Перенос поездки на другой сезон</option>
-                <option value="Другая причина">Другая причина</option>
-              </select>
-            </Field>
-
-            <Field label="Комментарий к заявлению (необязательно)">
-              <textarea
-                rows={2}
-                placeholder="Укажите дополнительные детали, если необходимо..."
-                value={refundComment}
-                onChange={(e) => setRefundComment(e.target.value)}
+          {activeTab === 'archive' && (
+            <Card>
+              <DataTable
+                rows={archiveVouchers}
+                columns={archiveColumns}
+                rowKey={(v) => v.id}
+                caption="Архив поездок и завершённые путёвки"
+                searchText={archiveVouchers.length > 10 ? (v) => `${v.id} ${v.roomNumber ?? ''} ${v.checkIn ?? ''}` : undefined}
+                searchPlaceholder="Поиск по номеру путёвки или дате"
+                initialSort={{ key: 'dates', dir: 'desc' }}
+                emptyTitle="В архиве пока нет завершённых поездок"
+                emptyDescription="Здесь появятся завершённые и отменённые путёвки."
               />
-            </Field>
+            </Card>
+          )}
 
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: 10,
-                marginTop: 20,
-                paddingTop: 16,
-                borderTop: '1px solid var(--line)',
-              }}
-            >
-              <Button
-                variant="secondary"
-                onClick={() => setSelectedVoucherForRefund(null)}
-                disabled={refundSubmitting}
-              >
-                Отмена
-              </Button>
-              <Button
-                variant="danger"
-                onClick={() => void handleConfirmRefund()}
-                disabled={refundSubmitting}
-              >
-                {refundSubmitting ? 'Обработка возврата…' : 'Подтвердить возврат средств'}
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+          {activeTab === 'waitlist' && (
+            <Card title="Заявки в листе ожидания" subtitle="Отслеживание свободных мест в санатории">
+              <DataTable
+                rows={entries}
+                columns={waitlistColumns}
+                rowKey={(w) => w.id}
+                label="Заявки в листе ожидания"
+                emptyTitle="Лист ожидания пуст"
+                emptyDescription="Если нужный номер занят, вы можете подать заявку в лист ожидания со страницы поиска."
+                emptyAction={searchLink('Перейти к поиску')}
+              />
+            </Card>
+          )}
+        </>
+      )}
 
-      {/* Modal: Guest Voucher & Memo (Электронный ваучер и памятка гостя) */}
-      <Modal
-        isOpen={selectedVoucherForMemo !== null}
-        onClose={() => setSelectedVoucherForMemo(null)}
-        title={
-          selectedVoucherForMemo
-            ? `Электронный ваучер путёвки #${selectedVoucherForMemo.id}`
-            : ''
-        }
-        size="md"
-      >
-        {selectedVoucherForMemo && (
-          <div>
-            <div className="voucher-print-memo" id="voucher-print-area">
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'flex-start',
-                  borderBottom: '2px solid var(--line)',
-                  paddingBottom: 14,
-                  marginBottom: 16,
-                }}
-              >
-                <div>
-                  <h3 style={{ margin: 0, color: 'var(--accent)', fontSize: '1.25rem' }}>
-                    САНАТОРИЙ «ИИС»
-                  </h3>
-                  <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    Республика Беларусь, Минская обл., сосновый бор
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <Badge variant="good">ВАУЧЕР ОПЛАЧЕН</Badge>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                    Путёвка #{selectedVoucherForMemo.id}
-                  </div>
-                </div>
-              </div>
+      <RefundModal
+        voucher={selectedVoucherForRefund}
+        calc={refundCalc}
+        reason={refundReason}
+        comment={refundComment}
+        onReasonChange={setRefundReason}
+        onCommentChange={setRefundComment}
+        submitting={refundSubmitting}
+        error={error}
+        onConfirm={() => void handleConfirmRefund()}
+        onClose={() => setSelectedVoucherForRefund(null)}
+      />
 
-              <dl style={{ margin: 0, fontSize: '0.9rem' }}>
-                <dt>Период заезда:</dt>
-                <dd>
-                  <strong>
-                    {selectedVoucherForMemo.checkIn} — {selectedVoucherForMemo.checkOut}
-                  </strong>
-                </dd>
-                <dt>Расчётный час:</dt>
-                <dd>Заезд с 14:00, выезд до 12:00</dd>
-                <dt>Размещение:</dt>
-                <dd>
-                  {selectedVoucherForMemo.roomNumber
-                    ? `Комната № ${selectedVoucherForMemo.roomNumber}`
-                    : 'Категория подтверждена (комната на стойке регистрации)'}
-                </dd>
-                <dt>Количество гостей:</dt>
-                <dd>{selectedVoucherForMemo.places ?? 1} чел.</dd>
-                <dt>Сумма путёвки:</dt>
-                <dd style={{ color: 'var(--accent)', fontWeight: 700 }}>
-                  {money(selectedVoucherForMemo.totalPrice)}
-                </dd>
-              </dl>
+      <VoucherMemoModal voucher={selectedVoucherForMemo} onClose={() => setSelectedVoucherForMemo(null)} />
 
-              <div
-                style={{
-                  background: 'var(--bg)',
-                  padding: 12,
-                  borderRadius: 'var(--radius-md)',
-                  marginTop: 16,
-                  fontSize: '0.82rem',
-                  lineHeight: 1.5,
-                }}
-              >
-                <strong>Памятка для заселения:</strong>
-                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                  <li>Паспорт или документ, удостоверяющий личность;</li>
-                  <li>Санаторно-курортная карта (СКК) давностью не более 1 месяца;</li>
-                  <li>Круглосуточная стойка регистрации: +375 (17) 200-11-22.</li>
-                </ul>
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: 10,
-                marginTop: 20,
-              }}
-            >
-              <Button variant="secondary" onClick={() => setSelectedVoucherForMemo(null)}>
-                Закрыть
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  window.print();
-                }}
-              >
-                🖨️ Распечатать ваучер
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Leave Review Modal */}
       {reviewVoucher && (
         <LeaveReviewModal
           isOpen={Boolean(reviewVoucher)}
           onClose={() => setReviewVoucher(null)}
           voucher={reviewVoucher}
           onSuccess={() => {
-            setMessage('Спасибо за ваш отзыв! На ваш бонусный счёт начислено +50 баллов.');
+            toast.success('Спасибо за ваш отзыв! На ваш бонусный счёт начислено +50 баллов.');
             void load();
           }}
         />
       )}
+
+      {confirmDialog}
     </section>
   );
 }
